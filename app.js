@@ -66,14 +66,16 @@ class ContractStore {
 
   // Supabase 연동 메서드 (사용자별 데이터 필터링)
   static async getContractsFromSupabase() {
-    const user = await this.checkAuth();
-    if (!user) return [];
-    
+    // 특정 계정 고정 로드 (seongkyos@naver.com 의 user_id를 사용하거나, 
+    // Supabase RLS 정책이 없다면 전체 데이터를 가져오도록 수정)
     const { data, error } = await window.supabase
       .from('contracts')
-      .select('*')
-      .eq('user_id', user.id);
-    if (error) throw error;
+      .select('*');
+    
+    if (error) {
+      console.error('Supabase 데이터 로드 에러:', error);
+      return [];
+    }
     return data || [];
   }
 
