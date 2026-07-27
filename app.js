@@ -1,6 +1,6 @@
 /**
  * GFC Premium Manager - Samsung Life GFC Planner System
- * Features: Manual Club Tier Selection (9 tiers including 30만 Club),
+ * Features: Manual Club Tier Selection (9 tiers including 30 만 Club),
  * Senior Performance Bonuses (Club & Achievement), New Planner Support,
  * Multi-promotions, 16th month surrender values, and Employment Insurance deductions.
  * Updated with Independent Monthly TP Calculation, Detailed Multi-month Cashflow & Self Analysis.
@@ -41,6 +41,92 @@ class ContractStore {
     localStorage.setItem(this.STORAGE_KEY + '_settings', JSON.stringify(settings));
   }
 
+  // 인증 상태 관리
+  static async checkAuth() {
+    const { data: { user } } = await window.supabase.auth.getUser();
+    return user;
+  }
+
+  static async login(email, password) {
+    const { data, error } = await window.supabase.auth.signInWithPassword({ email, password });
+    if (error) throw error;
+    return data;
+  }
+
+  static async logout() {
+    await window.supabase.auth.signOut();
+  }
+
+  // Supabase 연동 메서드 (사용자별 데이터 필터링)
+  static async getContractsFromSupabase() {
+    const user = await this.checkAuth();
+    if (!user) return [];
+    
+    const { data, error } = await window.supabase
+      .from('contracts')
+      .select('*')
+      .eq('user_id', user.id);
+    if (error) throw error;
+    return data || [];
+  }
+
+  static async syncToSupabase(contract) {
+    const user = await this.checkAuth();
+    if (!user) return;
+    
+    const { data, error } = await window.supabase
+      .from('contracts')
+      .insert([{ ...contract, user_id: user.id }]);
+    if (error) throw error;
+    return data;
+  }
+
+  // 로컬 데이터를 Supabase 로 마이그레이션
+  static async migrateLocalDataToSupabase() {
+    const user = await this.checkAuth();
+    if (!user) return { success: false, message: '로그인이 필요합니다.' };
+
+    const localContracts = this.getContracts();
+    if (localContracts.length === 0) {
+      return { success: true, message: '마이그레이션할 로컬 데이터가 없습니다.' };
+    }
+
+    try {
+      // Supabase 에 이미 같은 ID 가 있는지 확인
+      const { data: existingData } = await window.supabase
+        .from('contracts')
+        .select('id')
+        .eq('user_id', user.id);
+
+      const existingIds = new Set((existingData || []).map(d => d.id));
+
+      // 로컬 데이터 중 Supabase 에 없는 데이터만 필터링
+      const contractsToInsert = localContracts.filter(c => !existingIds.has(c.id));
+
+      if (contractsToInsert.length === 0) {
+        return { success: true, message: '모든 데이터가 이미 Supabase 에 있습니다.' };
+      }
+
+      // Supabase 에 데이터 삽입
+      const { error: insertError } = await window.supabase
+        .from('contracts')
+        .insert(contractsToInsert.map(c => ({ ...c, user_id: user.id })));
+
+      if (insertError) {
+        console.error('Supabase insert error:', insertError);
+        return { success: false, message: 'Supabase 저장 실패: ' + insertError.message };
+      }
+
+      // 로컬 데이터 삭제
+      this.saveContracts([]);
+
+      return { success: true, message: `${contractsToInsert.length}개의 데이터를 Supabase 로 마이그레이션했습니다.` };
+    } catch (e) {
+      console.error('Migration error:', e);
+      return { success: false, message: '마이그레이션 중 오류 발생: ' + e.message };
+    }
+  }
+
   static addContract(contract) {
     const contracts = this.getContracts();
     contract.id = 'GFC*' + Date.now() + '-' + Math.floor(Math.random() * 1000);
@@ -60,6 +146,51 @@ class ContractStore {
     let contracts = this.getContracts();
     contracts = contracts.filter(c => c.id !== id);
     this.saveContracts(contracts);
+  }
+
+  // Supabase 연동 메서드들
+  static async addContractToSupabase(contract) {
+    const user = await this.checkAuth();
+    if (!user) throw new Error('로그인이 필요합니다.');
+    
+    contract.id = 'GFC*' + Date.now() + '-' + Math.floor(Math.random() * 1000);
+    contract.createdAt = new Date().toISOString();
+    
+    const { data, error } = await window.supabase
+      .from('contracts')
+      .insert([{ ...contract, user_id: user.id }])
+      .select();
+    
+    if (error) throw error;
+    return data[0];
+  }
+
+  static async updateContractToSupabase(contract) {
+    const user = await this.checkAuth();
+    if (!user) throw new Error('로그인이 필요합니다.');
+    
+    const { data, error } = await window.supabase
+      .from('contracts')
+      .update({ ...contract })
+      .eq('id', contract.id)
+      .eq('user_id', user.id)
+      .select();
+    
+    if (error) throw error;
+    return data[0];
+  }
+
+  static async deleteContractFromSupabase(id) {
+    const user = await this.checkAuth();
+    if (!user) throw new Error('로그인이 필요합니다.');
+    
+    const { error } = await window.supabase
+      .from('contracts')
+      .delete()
+      .eq('id', id)
+      .eq('user_id', user.id);
+    
+    if (error) throw error;
   }
 
   static generateSampleData() {
@@ -88,7 +219,7 @@ class ContractStore {
         promotions: [
           { type: 'percent', value: 300, afterPaymentMonth: 1 }
         ],
-        memo: '건강보험 300% 시책 (1회차 납입 후 익월 지급)',
+        memo: '건강보험 300% 시책 (1 회차 납입 후 익월 지급)',
         createdAt: new Date().toISOString()
       },
       {
@@ -96,8 +227,8 @@ class ContractStore {
         contractType: '자기계약',
         status: '정상유지',
         terminationMonth: 6,
-        productGroup: '종신/GI보험',
-        client: '본인(GFC)',
+        productGroup: '종신/GI 보험',
+        client: '본인 (GFC)',
         company: '삼성생명',
         title: '무배당 경영인 종신보험 (자기)',
         startDate: formatDate(2),
@@ -109,7 +240,7 @@ class ContractStore {
           { type: 'amount', value: 200000, afterPaymentMonth: 1 },
           { type: 'percent', value: 100, afterPaymentMonth: 13 }
         ],
-        memo: '종신 자기계약 및 16회차 해지 환급금 수지분석',
+        memo: '종신 자기계약 및 16 회차 해지 환급금 수지분석',
         createdAt: new Date().toISOString()
       }
     ];
@@ -119,7 +250,7 @@ class ContractStore {
   }
 }
 
-// --- GFC Advanced Financial Engine (Manual Club Tier Integration with 30만 Club) ---
+// --- GFC Advanced Financial Engine (Manual Club Tier Integration with 30 만 Club) ---
 class GfcAdvancedEngine {
   static calculateTenureMonth(joinDateStr, targetDate = new Date()) {
     if (!joinDateStr) return 1;
@@ -133,14 +264,14 @@ class GfcAdvancedEngine {
 
   static getClubBonusParams(clubTierKey) {
     switch (clubTierKey) {
-      case 'consultant': return { name: '일반 컨설턴트 (무Club)', rate: 0.40 };
-      case 'club_30': return { name: '30만 Club', rate: 0.45 };
-      case 'club_50': return { name: '50만 Club', rate: 0.50 };
-      case 'club_70': return { name: '70만 Club', rate: 0.60 };
-      case 'club_100': return { name: '100만 Club', rate: 0.65 };
-      case 'club_150': return { name: '150만 Club', rate: 0.75 };
+      case 'consultant': return { name: '일반 컨설턴트 (무 Club)', rate: 0.40 };
+      case 'club_30': return { name: '30 만 Club', rate: 0.45 };
+      case 'club_50': return { name: '50 만 Club', rate: 0.50 };
+      case 'club_70': return { name: '70 만 Club', rate: 0.60 };
+      case 'club_100': return { name: '100 만 Club', rate: 0.65 };
+      case 'club_150': return { name: '150 만 Club', rate: 0.75 };
       case 'club_230': return { name: '명인 Club', rate: 0.90 };
-      case 'club_350': default: return { name: '프레스티지 명인 (명인P)', rate: 0.95 };
+      case 'club_350': default: return { name: '프레스티지 명인 (명인 P)', rate: 0.95 };
     }
   }
 
@@ -190,7 +321,7 @@ class GfcAdvancedEngine {
 
   static getFeeSchedule(productGroup, isSenior = false) {
     if (!isSenior) {
-      if (productGroup === '종신/GI보험') return [112, 8,8,8,8,8,8,8,8,8,8,8, 20,20, 12];
+      if (productGroup === '종신/GI 보험') return [112, 8,8,8,8,8,8,8,8,8,8,8, 20,20, 12];
       if (productGroup === '건강/상해보험') return [200, 0,0,0,0,0,0,0,0,0,0,0, 20,20, 12];
       return [102, 8,8,8,8,8,8,8,8,8,8,8, 20,20, 12];
     } else {
@@ -403,10 +534,39 @@ class AppUI {
     // Utility buttons
     this.btnSampleData = document.getElementById('btn-sample-data');
     this.btnExport = document.getElementById('btn-export');
+    this.btnMigrate = document.getElementById('btn-migrate');
     this.importFileInput = document.getElementById('import-file');
   }
 
   bindEvents() {
+    // 인증 이벤트
+    document.getElementById('btn-login').addEventListener('click', async () => {
+      const email = document.getElementById('login-email').value;
+      const password = document.getElementById('login-password').value;
+      try {
+        await ContractStore.login(email, password);
+        this.loadDataAndRender();
+      } catch (e) { alert('로그인 실패: ' + e.message); }
+    });
+
+    document.getElementById('btn-logout').addEventListener('click', async () => {
+      // 로그아웃 전에 로컬 데이터를 Supabase 로 마이그레이션
+      const localContracts = ContractStore.getContracts();
+      if (localContracts.length > 0) {
+        if (confirm('로컬 데이터가 있습니다. Supabase 로 마이그레이션하시겠습니까?')) {
+          const user = await ContractStore.checkAuth();
+          if (user) {
+            const result = await ContractStore.migrateLocalDataToSupabase();
+            alert(result.message);
+          }
+        }
+      }
+      await ContractStore.logout();
+      this.contracts = [];
+      this.renderAll();
+      location.reload();
+    });
+
     this.btnOpenModal.addEventListener('click', () => this.openModal());
     this.btnCloseModal.addEventListener('click', () => this.closeModal());
     this.btnCancelModal.addEventListener('click', () => this.closeModal());
@@ -497,21 +657,88 @@ class AppUI {
       }
     });
 
+    this.btnMigrate.addEventListener('click', async () => {
+      const localContracts = ContractStore.getContracts();
+      if (localContracts.length === 0) {
+        alert('마이그레이션할 로컬 데이터가 없습니다.');
+        return;
+      }
+
+      try {
+        const user = await ContractStore.checkAuth();
+        if (!user) {
+          alert('로그인이 필요합니다. 먼저 로그인해주세요.');
+          return;
+        }
+
+        if (confirm(`${localContracts.length}개의 로컬 데이터를 Supabase 로 마이그레이션하시겠습니까?\n\n마이그레이션 후 로컬 데이터는 삭제됩니다.`)) {
+          const result = await ContractStore.migrateLocalDataToSupabase();
+          alert(result.message);
+          if (result.success) {
+            this.contracts = await ContractStore.getContractsFromSupabase();
+            this.renderAll();
+          }
+        }
+      } catch (e) {
+        alert('마이그레이션 중 오류 발생: ' + e.message);
+      }
+    });
+
     this.btnExport.addEventListener('click', () => this.exportData());
     this.importFileInput.addEventListener('change', (e) => this.importData(e));
   }
 
-  loadDataAndRender() {
-    this.contracts = ContractStore.getContracts();
-    if (this.contracts.length === 0) {
-      this.contracts = ContractStore.generateSampleData();
+  async loadDataAndRender() {
+    try {
+      const user = await ContractStore.checkAuth();
+      if (user) {
+        // 로그인 상태
+        document.getElementById('login-container').classList.add('hidden');
+        document.getElementById('auth-container').classList.remove('hidden');
+        document.getElementById('user-email').textContent = user.email;
+        document.getElementById('btn-open-modal').disabled = false;
+        document.getElementById('btn-open-modal').classList.remove('opacity-50', 'cursor-not-allowed');
+        
+        this.contracts = await ContractStore.getContractsFromSupabase();
+        
+        // 로그인 상태에서는 설정값 로드
+        if (this.settings.joinDate) {
+          this.plannerJoinInput.value = this.settings.joinDate;
+        }
+        if (this.settings.clubTier) {
+          this.selectClubTier.value = this.settings.clubTier;
+        }
+      } else {
+        // 비로그인 상태
+        document.getElementById('login-container').classList.remove('hidden');
+        document.getElementById('auth-container').classList.add('hidden');
+        document.getElementById('btn-open-modal').disabled = true;
+        document.getElementById('btn-open-modal').classList.add('opacity-50', 'cursor-not-allowed');
+        
+        this.contracts = [];
+        // 비로그인 상태에서는 설정값 초기화
+        this.plannerJoinInput.value = '';
+        this.selectClubTier.value = 'consultant';
+        this.settings.joinDate = '';
+        this.settings.clubTier = 'consultant';
+        ContractStore.saveSettings(this.settings);
+      }
+    } catch (e) {
+      console.error('Auth check failed:', e);
+      // 인증 체크 실패 시 비로그인 상태로 처리
+      document.getElementById('login-container').classList.remove('hidden');
+      document.getElementById('auth-container').classList.add('hidden');
+      document.getElementById('btn-open-modal').disabled = true;
+      document.getElementById('btn-open-modal').classList.add('opacity-50', 'cursor-not-allowed');
+      this.contracts = [];
+      // 비로그인 상태에서는 설정값 초기화
+      this.plannerJoinInput.value = '';
+      this.selectClubTier.value = 'consultant';
+      this.settings.joinDate = '';
+      this.settings.clubTier = 'consultant';
+      ContractStore.saveSettings(this.settings);
     }
-    if (this.settings.joinDate) {
-      this.plannerJoinInput.value = this.settings.joinDate;
-    }
-    if (this.settings.clubTier) {
-      this.selectClubTier.value = this.settings.clubTier;
-    }
+
     this.renderAll();
   }
 
@@ -530,6 +757,17 @@ class AppUI {
     const totalCount = this.contracts.length;
     const realCount = this.contracts.filter(c => c.contractType === '진성계약').length;
     const selfCount = this.contracts.filter(c => c.contractType === '자기계약').length;
+
+    // 로그인 전 (joinDate 가 없는 경우) 에는 0 원 표시
+    if (!this.settings.joinDate) {
+      this.kpiTotalCount.textContent = '0 건';
+      this.kpiContractBreakdown.textContent = '진성계약 0 건 · 자기계약 0 건';
+      this.kpiRealIncome.textContent = '0 원';
+      this.kpiSelfExpense.textContent = '0 원';
+      this.kpiNetProfit.textContent = '0 원';
+      this.kpiNetProfit.className = 'text-2xl font-extrabold mt-1 text-slate-900';
+      return;
+    }
 
     const clubKey = this.selectClubTier.value || 'club_350';
     const aggregated = GfcAdvancedEngine.calculateAggregatedCashflow(this.contracts, 1, this.settings.joinDate, clubKey, false);
@@ -615,7 +853,7 @@ class AppUI {
           </td>
           <td class="py-3 px-4 text-slate-600 whitespace-nowrap">
             <div class="font-medium text-amber-700">${surrender16 > 0 ? surrender16.toLocaleString() + '원' : '미입력'}</div>
-            <div class="text-[10px] text-slate-400">16회 해지 환급금</div>
+            <div class="text-[10px] text-slate-400">16 회 해지 환급금</div>
           </td>
           <td class="py-3 px-4 text-center whitespace-nowrap">
             <div class="flex items-center justify-center space-x-1">
@@ -675,19 +913,19 @@ class AppUI {
           
           <div class="grid grid-cols-2 gap-2 pt-1 border-t border-slate-200/60 text-slate-600">
             <div>
-              <span class="text-slate-400 block text-[10px]">15회 총 납입지출</span>
+              <span class="text-slate-400 block text-[10px]">15 회 총 납입지출</span>
               <span class="font-bold text-slate-800">-${totalExpense15.toLocaleString()}원</span>
             </div>
             <div>
-              <span class="text-slate-400 block text-[10px]">수수료+시책(공제후)</span>
+              <span class="text-slate-400 block text-[10px]">수수료 + 시책 (공제후)</span>
               <span class="font-bold text-emerald-600">+${Math.round(totalIncomeNet).toLocaleString()}원</span>
             </div>
             <div>
-              <span class="text-slate-400 block text-[10px]">16회 해약환급금</span>
+              <span class="text-slate-400 block text-[10px]">16 회 해약환급금</span>
               <span class="font-bold text-blue-600">+${surrender16.toLocaleString()}원</span>
             </div>
             <div>
-              <span class="text-slate-400 block text-[10px]">16회 해지 시 최종순손익</span>
+              <span class="text-slate-400 block text-[10px]">16 회 해지 시 최종순손익</span>
               <span class="font-bold ${netProfitAt16 >= 0 ? 'text-emerald-600' : 'text-rose-600'}">
                 ${netProfitAt16 >= 0 ? '+' : ''}${Math.round(netProfitAt16).toLocaleString()}원
               </span>
@@ -745,7 +983,7 @@ class AppUI {
       }
     ] : [
       {
-        label: '진성+성과보너스+시책 수입 (공제후)',
+        label: '진성 + 성과보너스 + 시책 수입 (공제후)',
         data: realIncomes,
         backgroundColor: '#059669',
         borderRadius: 4,
@@ -968,7 +1206,7 @@ class AppUI {
           ${bonusBreakdown}
 
           <div>
-            <h4 class="font-bold text-slate-800 mb-2 text-xs">해당 월 계약별 수수료 및 시책 상세 (당월 TP합계: ${totalTP.toLocaleString()}원)</h4>
+            <h4 class="font-bold text-slate-800 mb-2 text-xs">해당 월 계약별 수수료 및 시책 상세 (당월 TP 합계: ${totalTP.toLocaleString()}원)</h4>
             <div class="space-y-2 max-h-[180px] overflow-y-auto custom-scrollbar">
               ${contractRows || '<p class="text-slate-400 text-center py-4">해당 월에 실적이 발생하는 정상유지 계약이 없습니다.</p>'}
             </div>
@@ -1039,21 +1277,21 @@ class AppUI {
     let htmlContent = `
       <div class="space-y-4">
         <div class="p-4 bg-rose-50 rounded-xl border border-rose-200 text-rose-900 space-y-2">
-          <p class="font-bold text-sm">🛡️ ${c.title} (${c.client}) 16회차 해지 수지분석 상세</p>
+          <p class="font-bold text-sm">🛡️ ${c.title} (${c.client}) 16 회차 해지 수지분석 상세</p>
           <div class="grid grid-cols-2 gap-2 text-xs">
-            <div>15회 총 납입지출: <strong class="text-rose-600">-${totalExpense15.toLocaleString()}원</strong></div>
-            <div>해약환급금(16회차): <strong class="text-blue-600">+${surrender16.toLocaleString()}원</strong></div>
-            <div>수수료+시책(공제전): <strong class="text-emerald-600">+${Math.round(totalGross).toLocaleString()}원</strong></div>
-            <div>고용보험공제(0.8%): <strong class="text-rose-600">-${deduction.toLocaleString()}원</strong></div>
+            <div>15 회 총 납입지출: <strong class="text-rose-600">-${totalExpense15.toLocaleString()}원</strong></div>
+            <div>해약환급금(16 회차): <strong class="text-blue-600">+${surrender16.toLocaleString()}원</strong></div>
+            <div>수수료 + 시책 (공제전): <strong class="text-emerald-600">+${Math.round(totalGross).toLocaleString()}원</strong></div>
+            <div>고용보험공제 (0.8%): <strong class="text-rose-600">-${deduction.toLocaleString()}원</strong></div>
           </div>
           <div class="border-t border-rose-200 pt-2 flex justify-between text-sm font-extrabold">
-            <span>16회 해지 시 최종 순손익:</span>
+            <span>16 회 해지 시 최종 순손익:</span>
             <span class="${netProfitAt16 >= 0 ? 'text-emerald-600' : 'text-rose-600'}">${netProfitAt16 >= 0 ? '+' : ''}${Math.round(netProfitAt16).toLocaleString()}원</span>
           </div>
         </div>
 
         <div>
-          <h4 class="font-bold text-slate-800 mb-2">1~15회차 월별 수수료 지급 내역</h4>
+          <h4 class="font-bold text-slate-800 mb-2">1~15 회차 월별 수수료 지급 내역</h4>
           <div class="space-y-1 max-h-[160px] overflow-y-auto custom-scrollbar text-xs bg-slate-50 p-3 rounded-xl border border-slate-200">
             ${monthlyCommRows}
           </div>
@@ -1083,7 +1321,7 @@ class AppUI {
         <option value="amount">고정 금액 (원)</option>
       </select>
       <input type="number" class="promo-value px-2 py-1.5 bg-slate-50 border border-slate-300 rounded text-xs w-24" placeholder="수치" value="${promo ? promo.value : ''}">
-      <input type="number" class="promo-month px-2 py-1.5 bg-slate-50 border border-slate-300 rounded text-xs w-28" placeholder="납입회차" value="${promo ? promo.afterPaymentMonth : 1}" min="1" max="60" title="N회차 납입 후 익월 지급">
+      <input type="number" class="promo-month px-2 py-1.5 bg-slate-50 border border-slate-300 rounded text-xs w-28" placeholder="납입회차" value="${promo ? promo.afterPaymentMonth : 1}" min="1" max="60" title="N 회차 납입 후 익월 지급">
       <span class="text-[10px] text-slate-500 whitespace-nowrap">회차 납입 후 익월</span>
       <button type="button" onclick="this.closest('.promo-row').remove()" class="ml-auto text-rose-500 hover:text-rose-700 p-1">
         <i data-lucide="trash-2" class="w-4 h-4"></i>
@@ -1153,7 +1391,7 @@ class AppUI {
     this.modal.classList.add('hidden');
   }
 
-  handleFormSubmit(e) {
+  async handleFormSubmit(e) {
     e.preventDefault();
     const id = document.getElementById('form-id').value;
 
@@ -1186,23 +1424,34 @@ class AppUI {
       memo: document.getElementById('form-memo').value.trim()
     };
 
-    if (id) {
-      contractData.id = id;
-      ContractStore.updateContract(contractData);
-    } else {
-      ContractStore.addContract(contractData);
+    try {
+      if (id) {
+        // 수정: Supabase 에서 업데이트
+        contractData.id = id;
+        await ContractStore.updateContractToSupabase(contractData);
+      } else {
+        // 추가: Supabase 에 저장
+        await ContractStore.addContractToSupabase(contractData);
+      }
+      alert('데이터가 Supabase 에 저장되었습니다.');
+      this.contracts = await ContractStore.getContractsFromSupabase();
+      this.closeModal();
+      this.renderAll();
+    } catch (e) {
+      alert('저장 실패: ' + e.message);
     }
-
-    this.contracts = ContractStore.getContracts();
-    this.closeModal();
-    this.renderAll();
   }
 
-  deleteContract(id) {
+  async deleteContract(id) {
     if (confirm('해당 계약 항목을 삭제하시겠습니까?')) {
-      ContractStore.deleteContract(id);
-      this.contracts = ContractStore.getContracts();
-      this.renderAll();
+      try {
+        await ContractStore.deleteContractFromSupabase(id);
+        alert('데이터가 Supabase 에서 삭제되었습니다.');
+        this.contracts = await ContractStore.getContractsFromSupabase();
+        this.renderAll();
+      } catch (e) {
+        alert('삭제 실패: ' + e.message);
+      }
     }
   }
 
