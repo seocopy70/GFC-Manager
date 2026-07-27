@@ -89,11 +89,15 @@
           const signupInviteCode = document.getElementById('signup-invite-code');
           let isSignupMode = false;
 
-          const user = await AuthService.checkAuth();
-          if (user) {
-            loginOverlay.classList.add('hidden');
-            mainHeader.classList.remove('hidden');
-            document.getElementById('user-email').textContent = user.email;
+          try {
+            const { data: { user } } = await window.supabase.auth.getUser();
+            if (user) {
+              loginOverlay.classList.add('hidden');
+              mainHeader.classList.remove('hidden');
+              document.getElementById('user-email').textContent = user.email;
+            }
+          } catch (e) {
+            console.error('Auth check error:', e);
           }
 
           btnToggleSignup.addEventListener('click', () => {
@@ -103,23 +107,35 @@
             btnLogin.textContent = isSignupMode ? '가입 신청' : '로그인';
           });
 
-          btnLogin.addEventListener('click', async () => {
-            const email = document.getElementById('login-email').value;
-            const password = document.getElementById('login-password').value;
-            const inviteCode = signupInviteCode.value;
+           btnLogin.addEventListener('click', async () => {
+             const email = document.getElementById('login-email').value;
+             const password = document.getElementById('login-password').value;
+             const inviteCode = signupInviteCode.value;
 
-            if (isSignupMode) {
-              if (inviteCode !== 'GFC2025') { alert('유효하지 않은 초대 코드입니다.'); return; }
-              const { error } = await window.supabase.auth.signUp({ email, password });
-              if (error) alert('가입 실패: ' + error.message);
-              else alert('가입 신청 완료. 이메일을 확인해주세요.');
-            } else {
-              try {
-                await AuthService.login(email, password);
-                location.reload();
-              } catch (e) { alert('로그인 실패: ' + e.message); }
-            }
-          });
+             console.log('Login attempt:', { email, isSignupMode });
+
+             if (isSignupMode) {
+               if (inviteCode !== 'GFC2025') { alert('유효하지 않은 초대 코드입니다.'); return; }
+               const { data, error } = await window.supabase.auth.signUp({ email, password });
+               if (error) {
+                 console.error('Signup error:', error);
+                 alert('가입 실패: ' + error.message);
+               } else {
+                 console.log('Signup success:', data);
+                 alert('가입 신청 완료. 이메일을 확인해주세요.');
+               }
+             } else {
+               try {
+                 const { data, error } = await window.supabase.auth.signInWithPassword({ email, password });
+                 if (error) throw error;
+                 console.log('Login success:', data);
+                 location.reload();
+               } catch (e) {
+                 console.error('Login error:', e);
+                 alert('로그인 실패: ' + e.message);
+               }
+             }
+           });
 
           btnLogout.addEventListener('click', async () => {
             await AuthService.logout();

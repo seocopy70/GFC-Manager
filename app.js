@@ -65,18 +65,17 @@ class ContractStore {
   static async login(email, password) {
     if (!window.supabase) {
       console.error('Supabase 객체 없음:', window.supabase);
-      throw new Error('Supabase가 초기화되지 않았습니다. 페이지를 새로고침하거나 네트워크 상태를 확인하세요.');
+      throw new Error('Supabase가 초기화되지 않았습니다.');
     }
     const { data, error } = await window.supabase.auth.signInWithPassword({ email, password });
-    if (error) {
-      console.error('Supabase 로그인 에러:', error);
-      throw new Error(error.message || '로그인 중 알 수 없는 오류가 발생했습니다.');
-    }
+    if (error) throw error;
     return data;
   }
 
   static async logout() {
-    await window.supabase.auth.signOut();
+    if (window.supabase) {
+      await window.supabase.auth.signOut();
+    }
   }
 
   // Supabase 연동 메서드 (사용자별 데이터 필터링)
