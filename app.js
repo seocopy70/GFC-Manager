@@ -737,12 +737,6 @@ class AppUI {
         document.getElementById('btn-open-modal').classList.add('opacity-50', 'cursor-not-allowed');
         
         this.contracts = [];
-        // 비로그인 상태에서는 설정값 초기화
-        this.plannerJoinInput.value = '';
-        this.selectClubTier.value = 'consultant';
-        this.settings.joinDate = '';
-        this.settings.clubTier = 'consultant';
-        ContractStore.saveSettings(this.settings);
       }
     } catch (e) {
       console.error('Auth check failed:', e);
@@ -752,12 +746,6 @@ class AppUI {
       document.getElementById('btn-open-modal').disabled = true;
       document.getElementById('btn-open-modal').classList.add('opacity-50', 'cursor-not-allowed');
       this.contracts = [];
-      // 비로그인 상태에서는 설정값 초기화
-      this.plannerJoinInput.value = '';
-      this.selectClubTier.value = 'consultant';
-      this.settings.joinDate = '';
-      this.settings.clubTier = 'consultant';
-      ContractStore.saveSettings(this.settings);
     }
 
     this.renderAll();
