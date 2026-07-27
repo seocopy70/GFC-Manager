@@ -298,12 +298,43 @@ class AppUI {
         }
       });
     }
+
+    const btnOpenModal = document.getElementById('btn-open-modal');
+    if (btnOpenModal) {
+      btnOpenModal.addEventListener('click', () => {
+        document.getElementById('contract-modal').classList.remove('hidden');
+      });
+    }
+
+    const btnCloseModal = document.getElementById('btn-close-modal');
+    const btnCancelModal = document.getElementById('btn-cancel-modal');
+    const contractModal = document.getElementById('contract-modal');
+    
+    const closeContractModal = () => contractModal.classList.add('hidden');
+    if (btnCloseModal) btnCloseModal.addEventListener('click', closeContractModal);
+    if (btnCancelModal) btnCancelModal.addEventListener('click', closeContractModal);
+
+    const btnCloseDetailModal = document.getElementById('btn-close-detail-modal');
+    if (btnCloseDetailModal) {
+      btnCloseDetailModal.addEventListener('click', () => {
+        document.getElementById('detail-modal').classList.add('hidden');
+      });
+    }
+
+    const btnCloseRulesModal = document.getElementById('btn-close-rules-modal');
+    if (btnCloseRulesModal) {
+      btnCloseRulesModal.addEventListener('click', () => {
+        document.getElementById('rules-modal').classList.add('hidden');
+      });
+    }
   }
 
   async loadDataAndRender() {
     const user = await AuthService.checkAuth();
     if (user) {
       this.contracts = await ContractService.getContracts();
+      const userEmailEl = document.getElementById('user-email');
+      if (userEmailEl) userEmailEl.textContent = user.email;
     } else {
       this.contracts = [];
     }
