@@ -573,20 +573,9 @@ class AppUI {
     });
 
     document.getElementById('btn-logout').addEventListener('click', async () => {
-      // 로그아웃 전에 로컬 데이터를 Supabase 로 마이그레이션
-      const localContracts = ContractStore.getContracts();
-      if (localContracts.length > 0) {
-        if (confirm('로컬 데이터가 있습니다. Supabase 로 마이그레이션하시겠습니까?')) {
-          const user = await ContractStore.checkAuth();
-          if (user) {
-            const result = await ContractStore.migrateLocalDataToSupabase();
-            alert(result.message);
-          }
-        }
-      }
       await ContractStore.logout();
       this.contracts = [];
-      this.renderAll();
+      // 로그아웃 시 페이지를 새로고침하여 완전히 초기화
       location.reload();
     });
 
