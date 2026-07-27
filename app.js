@@ -49,9 +49,16 @@ class ContractStore {
   static async saveSettings(settings) {
     const user = await this.checkAuth();
     if (user) {
-      await window.supabase
+      // upsert 시 id와 settings 필드가 profiles 테이블 스키마와 일치하는지 확인
+      // 만약 profiles 테이블에 settings 컬럼이 JSONB 타입이 아니라면 에러 발생 가능
+      const { data, error } = await window.supabase
         .from('profiles')
         .upsert({ id: user.id, settings: settings });
+      
+      if (error) {
+        console.error('Supabase settings save error:', error);
+        throw new Error('Supabase 설정 저장 실패: ' + error.message);
+      }
     }
     localStorage.setItem(this.STORAGE_KEY + '_settings', JSON.stringify(settings));
   }
