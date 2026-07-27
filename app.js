@@ -550,13 +550,24 @@ class AppUI {
     document.getElementById('btn-login').addEventListener('click', async () => {
       const email = document.getElementById('login-email').value;
       const password = document.getElementById('login-password').value;
+      const btn = document.getElementById('btn-login');
+      const originalText = btn.textContent;
+      
       try {
+        btn.disabled = true;
+        btn.textContent = '로그인 중...';
         await ContractStore.login(email, password);
-        // 로그인 성공 후 UI 갱신 및 데이터 로드
+        
+        // 로그인 성공 후 UI 갱신
         document.getElementById('login-container').classList.add('hidden');
         document.getElementById('auth-container').classList.remove('hidden');
         await this.loadDataAndRender();
-      } catch (e) { alert('로그인 실패: ' + e.message); }
+      } catch (e) { 
+        alert('로그인 실패: ' + e.message); 
+      } finally {
+        btn.disabled = false;
+        btn.textContent = originalText;
+      }
     });
 
     document.getElementById('btn-logout').addEventListener('click', async () => {
