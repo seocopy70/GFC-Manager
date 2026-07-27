@@ -561,6 +561,8 @@ class AppUI {
         // 로그인 성공 후 UI 갱신
         document.getElementById('login-container').classList.add('hidden');
         document.getElementById('auth-container').classList.remove('hidden');
+        
+        // 데이터 로드 및 렌더링
         await this.loadDataAndRender();
       } catch (e) { 
         alert('로그인 실패: ' + e.message); 
@@ -713,7 +715,7 @@ class AppUI {
     try {
       const user = await ContractStore.checkAuth();
       if (user) {
-        // 로그인 상태
+        // 로그인 상태: UI 강제 고정
         document.getElementById('login-container').classList.add('hidden');
         document.getElementById('auth-container').classList.remove('hidden');
         document.getElementById('user-email').textContent = user.email;
@@ -722,30 +724,19 @@ class AppUI {
         
         this.contracts = await ContractStore.getContractsFromSupabase();
         
-        // 로그인 상태에서는 설정값 로드
-        if (this.settings.joinDate) {
-          this.plannerJoinInput.value = this.settings.joinDate;
-        }
-        if (this.settings.clubTier) {
-          this.selectClubTier.value = this.settings.clubTier;
-        }
+        // 설정값 로드
+        if (this.settings.joinDate) this.plannerJoinInput.value = this.settings.joinDate;
+        if (this.settings.clubTier) this.selectClubTier.value = this.settings.clubTier;
       } else {
         // 비로그인 상태
         document.getElementById('login-container').classList.remove('hidden');
         document.getElementById('auth-container').classList.add('hidden');
         document.getElementById('btn-open-modal').disabled = true;
         document.getElementById('btn-open-modal').classList.add('opacity-50', 'cursor-not-allowed');
-        
         this.contracts = [];
       }
     } catch (e) {
       console.error('Auth check failed:', e);
-      // 인증 체크 실패 시 비로그인 상태로 처리
-      document.getElementById('login-container').classList.remove('hidden');
-      document.getElementById('auth-container').classList.add('hidden');
-      document.getElementById('btn-open-modal').disabled = true;
-      document.getElementById('btn-open-modal').classList.add('opacity-50', 'cursor-not-allowed');
-      this.contracts = [];
     }
 
     this.renderAll();
