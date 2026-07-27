@@ -552,7 +552,10 @@ class AppUI {
       const password = document.getElementById('login-password').value;
       try {
         await ContractStore.login(email, password);
-        this.loadDataAndRender();
+        // 로그인 성공 후 UI 갱신 및 데이터 로드
+        document.getElementById('login-container').classList.add('hidden');
+        document.getElementById('auth-container').classList.remove('hidden');
+        await this.loadDataAndRender();
       } catch (e) { alert('로그인 실패: ' + e.message); }
     });
 
