@@ -48,6 +48,7 @@ class ContractStore {
   }
 
   static async login(email, password) {
+    if (!window.supabase) throw new Error('Supabase가 초기화되지 않았습니다.');
     const { data, error } = await window.supabase.auth.signInWithPassword({ email, password });
     if (error) throw error;
     return data;
