@@ -66,8 +66,6 @@ class ContractStore {
 
   // Supabase 연동 메서드 (사용자별 데이터 필터링)
   static async getContractsFromSupabase() {
-    // 특정 계정 고정 로드 (seongkyos@naver.com 의 user_id를 사용하거나, 
-    // Supabase RLS 정책이 없다면 전체 데이터를 가져오도록 수정)
     const { data, error } = await window.supabase
       .from('contracts')
       .select('*');
@@ -101,7 +99,6 @@ class ContractStore {
     }
 
     try {
-      // Supabase 에 이미 같은 ID 가 있는지 확인
       const { data: existingData } = await window.supabase
         .from('contracts')
         .select('id')
@@ -109,14 +106,12 @@ class ContractStore {
 
       const existingIds = new Set((existingData || []).map(d => d.id));
 
-      // 로컬 데이터 중 Supabase 에 없는 데이터만 필터링
       const contractsToInsert = localContracts.filter(c => !existingIds.has(c.id));
 
       if (contractsToInsert.length === 0) {
         return { success: true, message: '모든 데이터가 이미 Supabase 에 있습니다.' };
       }
 
-      // Supabase 에 데이터 삽입
       const { error: insertError } = await window.supabase
         .from('contracts')
         .insert(contractsToInsert.map(c => ({ ...c, user_id: user.id })));
@@ -126,7 +121,6 @@ class ContractStore {
         return { success: false, message: 'Supabase 저장 실패: ' + insertError.message };
       }
 
-      // 로컬 데이터 삭제
       this.saveContracts([]);
 
       return { success: true, message: `${contractsToInsert.length}개의 데이터를 Supabase 로 마이그레이션했습니다.` };
@@ -436,7 +430,6 @@ class GfcAdvancedEngine {
           const targetYear = targetDate.getFullYear();
           const targetMonth = targetDate.getMonth();
 
-          // Only count TP for the exact month the contract was newly signed (startDate)
           if (contractYear === targetYear && contractMonth === targetMonth) {
             monthlyTP += (Number(c.tp) || 0);
           }
@@ -514,11 +507,9 @@ class AppUI {
     this.plannerTenureBadge = document.getElementById('planner-tenure-badge');
     this.selectClubTier = document.getElementById('select-club-tier');
 
-    // Chart tabs
     this.tabAllFlow = document.getElementById('tab-all-flow');
     this.tabSelfFlow = document.getElementById('tab-self-flow');
 
-    // Modal elements
     this.modal = document.getElementById('contract-modal');
     this.modalTitle = document.getElementById('modal-title');
     this.contractForm = document.getElementById('contract-form');
@@ -530,7 +521,6 @@ class AppUI {
     this.formStatus = document.getElementById('form-status');
     this.terminationWrapper = document.getElementById('termination-month-wrapper');
 
-    // Detail Modal elements
     this.rulesModal = document.getElementById('rules-modal');
     this.btnOpenRulesModal = document.getElementById('btn-open-rules-modal');
     this.btnCloseRulesModal = document.getElementById('btn-close-rules-modal');
@@ -540,7 +530,6 @@ class AppUI {
     this.detailModalTitle = document.getElementById('detail-modal-title');
     this.detailModalBody = document.getElementById('detail-modal-body');
 
-    // Utility buttons
     this.btnSampleData = document.getElementById('btn-sample-data');
     this.btnExport = document.getElementById('btn-export');
     this.btnMigrate = document.getElementById('btn-migrate');
@@ -548,6 +537,11 @@ class AppUI {
   }
 
   bindEvents() {
+    document.getElementById('btn-logout').addEventListener('click', async () => {
+      await ContractStore.logout();
+      location.reload();
+    });
+
     this.btnOpenModal.addEventListener('click', () => this.openModal());
     this.btnCloseModal.addEventListener('click', () => this.closeModal());
     this.btnCancelModal.addEventListener('click', () => this.closeModal());
@@ -671,14 +665,23 @@ class AppUI {
 
   async loadDataAndRender() {
     try {
-      // 고정 계정 데이터 로드
-      this.contracts = await ContractStore.getContractsFromSupabase();
-      
-      // 설정값 로드
-      if (this.settings.joinDate) this.plannerJoinInput.value = this.settings.joinDate;
-      if (this.settings.clubTier) this.selectClubTier.value = this.settings.clubTier;
+      const user = await ContractStore.checkAuth();
+      if (user) {
+        document.getElementById('login-container').classList.add('hidden');
+        document.getElementById('auth-container').classList.remove('hidden');
+        document.getElementById('user-email').textContent = user.email;
+        
+        this.contracts = await ContractStore.getContractsFromSupabase();
+        
+        if (this.settings.joinDate) this.plannerJoinInput.value = this.settings.joinDate;
+        if (this.settings.clubTier) this.selectClubTier.value = this.settings.clubTier;
+      } else {
+        document.getElementById('login-container').classList.remove('hidden');
+        document.getElementById('auth-container').classList.add('hidden');
+        this.contracts = [];
+      }
     } catch (e) {
-      console.error('Data load failed:', e);
+      console.error('Auth check failed:', e);
     }
 
     this.renderAll();
@@ -700,7 +703,6 @@ class AppUI {
     const realCount = this.contracts.filter(c => c.contractType === '진성계약').length;
     const selfCount = this.contracts.filter(c => c.contractType === '자기계약').length;
 
-    // 로그인 전 (joinDate 가 없는 경우) 에는 0 원 표시
     if (!this.settings.joinDate) {
       this.kpiTotalCount.textContent = '0 건';
       this.kpiContractBreakdown.textContent = '진성계약 0 건 · 자기계약 0 건';
@@ -1368,11 +1370,9 @@ class AppUI {
 
     try {
       if (id) {
-        // 수정: Supabase 에서 업데이트
         contractData.id = id;
         await ContractStore.updateContractToSupabase(contractData);
       } else {
-        // 추가: Supabase 에 저장
         await ContractStore.addContractToSupabase(contractData);
       }
       alert('데이터가 Supabase 에 저장되었습니다.');
