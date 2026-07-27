@@ -28,7 +28,16 @@ class ContractStore {
     }
   }
 
-  static getSettings() {
+  static async getSettings() {
+    const user = await this.checkAuth();
+    if (user) {
+      const { data, error } = await window.supabase
+        .from('profiles')
+        .select('settings')
+        .eq('id', user.id)
+        .single();
+      if (data && data.settings) return data.settings;
+    }
     try {
       const data = localStorage.getItem(this.STORAGE_KEY + '_settings');
       return data ? JSON.parse(data) : { joinDate: '2025-01', clubTier: 'club_350' };
@@ -37,7 +46,13 @@ class ContractStore {
     }
   }
 
-  static saveSettings(settings) {
+  static async saveSettings(settings) {
+    const user = await this.checkAuth();
+    if (user) {
+      await window.supabase
+        .from('profiles')
+        .upsert({ id: user.id, settings: settings });
+    }
     localStorage.setItem(this.STORAGE_KEY + '_settings', JSON.stringify(settings));
   }
 
