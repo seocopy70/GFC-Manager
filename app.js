@@ -1382,6 +1382,8 @@ class AppUI {
       memo: document.getElementById('form-memo').value.trim()
     };
 
+    console.log('Saving contract data:', contractData);
+
     try {
       if (id) {
         contractData.id = id;
@@ -1394,6 +1396,7 @@ class AppUI {
       this.closeModal();
       this.renderAll();
     } catch (e) {
+      console.error('Save error:', e);
       alert('저장 실패: ' + e.message);
     }
   }
