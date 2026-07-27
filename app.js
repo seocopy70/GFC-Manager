@@ -546,39 +546,6 @@ class AppUI {
   }
 
   bindEvents() {
-    // 인증 이벤트
-    document.getElementById('btn-login').addEventListener('click', async () => {
-      const email = document.getElementById('login-email').value;
-      const password = document.getElementById('login-password').value;
-      const btn = document.getElementById('btn-login');
-      const originalText = btn.textContent;
-      
-      try {
-        btn.disabled = true;
-        btn.textContent = '로그인 중...';
-        await ContractStore.login(email, password);
-        
-        // 로그인 성공 후 UI 갱신
-        document.getElementById('login-container').classList.add('hidden');
-        document.getElementById('auth-container').classList.remove('hidden');
-        
-        // 데이터 로드 및 렌더링
-        await this.loadDataAndRender();
-      } catch (e) { 
-        alert('로그인 실패: ' + e.message); 
-      } finally {
-        btn.disabled = false;
-        btn.textContent = originalText;
-      }
-    });
-
-    document.getElementById('btn-logout').addEventListener('click', async () => {
-      await ContractStore.logout();
-      this.contracts = [];
-      // 로그아웃 시 페이지를 새로고침하여 완전히 초기화
-      location.reload();
-    });
-
     this.btnOpenModal.addEventListener('click', () => this.openModal());
     this.btnCloseModal.addEventListener('click', () => this.closeModal());
     this.btnCancelModal.addEventListener('click', () => this.closeModal());
@@ -702,32 +669,14 @@ class AppUI {
 
   async loadDataAndRender() {
     try {
-      const user = await ContractStore.checkAuth();
-      if (user) {
-        // 로그인 상태: UI 강제 고정
-        document.getElementById('login-container').classList.add('hidden');
-        document.getElementById('auth-container').classList.remove('hidden');
-        document.getElementById('user-email').textContent = user.email;
-        document.getElementById('btn-open-modal').disabled = false;
-        document.getElementById('btn-open-modal').classList.remove('opacity-50', 'cursor-not-allowed');
-        
-        this.contracts = await ContractStore.getContractsFromSupabase();
-        
-        // 설정값 로드
-        if (this.settings.joinDate) this.plannerJoinInput.value = this.settings.joinDate;
-        if (this.settings.clubTier) this.selectClubTier.value = this.settings.clubTier;
-      } else {
-        // 비로그인 상태: 입력창 초기화
-        document.getElementById('login-container').classList.remove('hidden');
-        document.getElementById('auth-container').classList.add('hidden');
-        document.getElementById('login-email').value = '';
-        document.getElementById('login-password').value = '';
-        document.getElementById('btn-open-modal').disabled = true;
-        document.getElementById('btn-open-modal').classList.add('opacity-50', 'cursor-not-allowed');
-        this.contracts = [];
-      }
+      // 고정 계정 데이터 로드
+      this.contracts = await ContractStore.getContractsFromSupabase();
+      
+      // 설정값 로드
+      if (this.settings.joinDate) this.plannerJoinInput.value = this.settings.joinDate;
+      if (this.settings.clubTier) this.selectClubTier.value = this.settings.clubTier;
     } catch (e) {
-      console.error('Auth check failed:', e);
+      console.error('Data load failed:', e);
     }
 
     this.renderAll();
