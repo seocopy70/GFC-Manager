@@ -132,29 +132,13 @@
         <div class="p-2 bg-emerald-600 rounded-xl text-white shadow-lg">
           <i data-lucide="shield-check" class="w-6 h-6"></i>
         </div>
-        <div>
-          <h1 class="text-lg font-bold tracking-tight">GFC Premium Manager</h1>
-        </div>
+        <h1 class="text-lg font-bold tracking-tight hidden sm:block">GFC Premium Manager</h1>
       </div>
       
-      <div class="flex items-center space-x-3">
-        <button id="btn-migrate" class="text-xs bg-amber-600 hover:bg-amber-500 text-white px-3 py-1.5 rounded-lg border border-amber-700 transition flex items-center gap-1.5" title="로컬 데이터를 Supabase 로 마이그레이션">
-          <i data-lucide="cloud-upload" class="w-3.5 h-3.5"></i>
-          로컬 데이터 마이그레이션
-        </button>
-        <button id="btn-export" class="text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white px-3 py-1.5 rounded-lg border border-slate-700 transition flex items-center gap-1.5">
-          <i data-lucide="download" class="w-3.5 h-3.5"></i>
-          내보내기
-        </button>
-        <label for="import-file" class="text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white px-3 py-1.5 rounded-lg border border-slate-700 transition flex items-center gap-1.5 cursor-pointer">
-          <i data-lucide="upload" class="w-3.5 h-3.5"></i>
-          불러오기
-        </label>
-        <input type="file" id="import-file" accept=".json" class="hidden">
-
-        <button id="btn-open-modal" class="text-xs bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2 rounded-lg font-medium transition shadow-md flex items-center gap-1.5">
+      <div class="flex items-center space-x-2 sm:space-x-3">
+        <button id="btn-open-modal" class="text-xs bg-emerald-600 hover:bg-emerald-500 text-white px-3 sm:px-4 py-2 rounded-lg font-medium transition shadow-md flex items-center gap-1.5">
           <i data-lucide="plus-circle" class="w-4 h-4"></i>
-          새 계약 등록
+          <span>새 계약 등록</span>
         </button>
       </div>
     </div>
@@ -163,12 +147,12 @@
   <!-- Main Container -->
   <main class="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
 
-    <!-- Planner Tenure & Club Selection Bar (9 Tiers including 30만 Club) -->
-    <section class="glass-card p-4 rounded-2xl border border-slate-200/80 shadow-sm grid grid-cols-1 md:grid-cols-3 gap-4 items-center">
-      <div class="flex items-center space-x-3">
+    <!-- Planner Tenure & Club Selection Bar -->
+    <section class="glass-card p-4 rounded-2xl border border-slate-200/80 shadow-sm flex flex-wrap gap-4 items-center justify-between">
+      <div class="flex items-center gap-2 flex-wrap">
         <div class="p-2 bg-emerald-100 text-emerald-800 rounded-xl font-bold text-xs flex items-center gap-2">
           <i data-lucide="calendar" class="w-4 h-4"></i>
-          위촉 연월:
+          <span class="hidden sm:inline">위촉 연월:</span>
         </div>
         <input type="month" id="planner-join-date" class="text-xs bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 font-bold text-slate-800 focus:ring-2 focus:ring-emerald-500 focus:outline-none">
         <span id="planner-tenure-badge" class="px-2.5 py-1 bg-brand-100 text-brand-800 rounded-lg text-xs font-bold">
@@ -176,10 +160,9 @@
         </span>
       </div>
 
-      <div class="flex items-center space-x-3 md:col-span-2 justify-end">
-        <div class="flex items-center space-x-2">
-          <label for="select-club-tier" class="text-xs font-semibold text-slate-700 whitespace-nowrap">Club 등급 선택:</label>
-          <select id="select-club-tier" class="text-xs bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 font-bold text-slate-800 focus:ring-2 focus:ring-emerald-500 focus:outline-none">
+      <div class="flex items-center gap-2 flex-wrap">
+        <label for="select-club-tier" class="text-xs font-semibold text-slate-700 whitespace-nowrap">Club 등급:</label>
+        <select id="select-club-tier" class="text-xs bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 font-bold text-slate-800 focus:ring-2 focus:ring-emerald-500 focus:outline-none">
             <option value="consultant">일반 컨설턴트 (무Club)</option>
             <option value="club_30">30만 Club</option>
             <option value="club_50">50만 Club</option>
@@ -303,16 +286,16 @@
     <!-- Contract Management Section -->
     <section class="glass-card rounded-2xl border border-slate-200/80 shadow-sm overflow-hidden">
       <!-- Section Header & Filter Controls -->
-      <div class="p-6 border-b border-slate-100 flex flex-wrap items-center justify-between gap-4">
+      <div class="p-6 border-b border-slate-100 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <div>
           <h2 class="text-base font-bold text-slate-800 flex items-center gap-2">
             <i data-lucide="database" class="w-5 h-5 text-emerald-600"></i>
-            보험 계약 및 상태 관리 데이터베이스
+            보험 계약 관리
           </h2>
-          <p class="text-xs text-slate-500">정상유지 / 해지 / 실효 상태 기록 및 해지 시점 관리</p>
+          <p class="text-xs text-slate-500">상태 기록 및 해지 시점 관리</p>
         </div>
 
-        <div class="flex flex-wrap items-center gap-3">
+        <div class="flex flex-wrap items-center gap-2">
           <!-- Search -->
           <div class="relative">
             <i data-lucide="search" class="w-4 h-4 absolute left-3 top-2.5 text-slate-400"></i>
@@ -330,17 +313,17 @@
 
       <!-- Contract Table -->
       <div class="overflow-x-auto">
-        <table class="w-full text-left border-collapse text-xs">
+        <table class="w-full text-left border-collapse text-xs whitespace-nowrap">
           <thead>
             <tr class="bg-slate-50 border-b border-slate-200 text-slate-600 font-semibold uppercase tracking-wider">
-              <th class="py-3 px-4">구분 / 상태</th>
-              <th class="py-3 px-4">상품분류 / 계약명</th>
-              <th class="py-3 px-4">계약자명 / 보험사</th>
-              <th class="py-3 px-4">계약일자</th>
-              <th class="py-3 px-4 text-right">월보험료 / 납기</th>
-              <th class="py-3 px-4 text-right">환산성적(TP)</th>
-              <th class="py-3 px-4 text-right text-emerald-600">다중 시책 합계</th>
-              <th class="py-3 px-4">해약환급금(16회차)</th>
+              <th class="py-3 px-4">구분</th>
+              <th class="py-3 px-4">상품명</th>
+              <th class="py-3 px-4">계약자</th>
+              <th class="py-3 px-4">계약일</th>
+              <th class="py-3 px-4 text-right">보험료</th>
+              <th class="py-3 px-4 text-right">TP</th>
+              <th class="py-3 px-4 text-right text-emerald-600">시책</th>
+              <th class="py-3 px-4">환급금</th>
               <th class="py-3 px-4 text-center">관리</th>
             </tr>
           </thead>

@@ -48,9 +48,15 @@ class ContractStore {
   }
 
   static async login(email, password) {
-    if (!window.supabase) throw new Error('Supabase가 초기화되지 않았습니다.');
+    if (!window.supabase) {
+      console.error('Supabase 객체 없음:', window.supabase);
+      throw new Error('Supabase가 초기화되지 않았습니다. 페이지를 새로고침하거나 네트워크 상태를 확인하세요.');
+    }
     const { data, error } = await window.supabase.auth.signInWithPassword({ email, password });
-    if (error) throw error;
+    if (error) {
+      console.error('Supabase 로그인 에러:', error);
+      throw new Error(error.message || '로그인 중 알 수 없는 오류가 발생했습니다.');
+    }
     return data;
   }
 
