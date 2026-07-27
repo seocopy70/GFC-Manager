@@ -281,7 +281,11 @@ class AppUI {
   }
 
   initElements() {
-    // ... (기존 요소 초기화 유지)
+    const joinDateInput = document.getElementById('planner-join-date');
+    if (joinDateInput) joinDateInput.value = this.settings.joinDate;
+    
+    const clubTierSelect = document.getElementById('select-club-tier');
+    if (clubTierSelect) clubTierSelect.value = this.settings.clubTier;
   }
 
   bindEvents() {
@@ -296,6 +300,24 @@ class AppUI {
         } catch (e) {
           alert('로그인 실패: ' + e.message);
         }
+      });
+    }
+
+    const joinDateInput = document.getElementById('planner-join-date');
+    if (joinDateInput) {
+      joinDateInput.addEventListener('change', (e) => {
+        this.settings.joinDate = e.target.value;
+        LocalStorageStore.saveSettings(this.settings);
+        this.renderAll();
+      });
+    }
+
+    const clubTierSelect = document.getElementById('select-club-tier');
+    if (clubTierSelect) {
+      clubTierSelect.addEventListener('change', (e) => {
+        this.settings.clubTier = e.target.value;
+        LocalStorageStore.saveSettings(this.settings);
+        this.renderAll();
       });
     }
 
