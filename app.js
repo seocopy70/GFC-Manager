@@ -177,11 +177,25 @@ class ContractStore {
     const user = await this.checkAuth();
     if (!user) throw new Error('로그인이 필요합니다.');
     
+    // 데이터 정제: undefined/null 값 제거 및 타입 변환
     const contractToSave = {
-      ...contract,
       user_id: user.id,
       id: 'GFC*' + Date.now() + '-' + Math.floor(Math.random() * 1000),
-      createdAt: new Date().toISOString()
+      createdAt: new Date().toISOString(),
+      contractType: contract.contractType || '진성계약',
+      status: contract.status || '정상유지',
+      terminationMonth: Number(contract.terminationMonth) || 0,
+      productGroup: contract.productGroup || '건강/상해보험',
+      client: contract.client || '',
+      company: contract.company || '삼성생명',
+      title: contract.title || '',
+      startDate: contract.startDate || new Date().toISOString().split('T')[0],
+      premium: Number(contract.premium) || 0,
+      paymentYears: Number(contract.paymentYears) || 20,
+      tp: Number(contract.tp) || 0,
+      surrenderValue16: Number(contract.surrenderValue16) || 0,
+      promotions: contract.promotions || [],
+      memo: contract.memo || ''
     };
     
     console.log('Supabase insert payload:', contractToSave);
@@ -193,7 +207,7 @@ class ContractStore {
     
     if (error) {
       console.error('Supabase insert error details:', error);
-      throw error;
+      throw new Error('계약 저장 실패: ' + error.message);
     }
     return data[0];
   }
