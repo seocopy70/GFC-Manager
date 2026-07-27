@@ -717,9 +717,11 @@ class AppUI {
         if (this.settings.joinDate) this.plannerJoinInput.value = this.settings.joinDate;
         if (this.settings.clubTier) this.selectClubTier.value = this.settings.clubTier;
       } else {
-        // 비로그인 상태
+        // 비로그인 상태: 입력창 초기화
         document.getElementById('login-container').classList.remove('hidden');
         document.getElementById('auth-container').classList.add('hidden');
+        document.getElementById('login-email').value = '';
+        document.getElementById('login-password').value = '';
         document.getElementById('btn-open-modal').disabled = true;
         document.getElementById('btn-open-modal').classList.add('opacity-50', 'cursor-not-allowed');
         this.contracts = [];
