@@ -170,15 +170,24 @@ class ContractStore {
     const user = await this.checkAuth();
     if (!user) throw new Error('로그인이 필요합니다.');
     
-    contract.id = 'GFC*' + Date.now() + '-' + Math.floor(Math.random() * 1000);
-    contract.createdAt = new Date().toISOString();
+    const contractToSave = {
+      ...contract,
+      user_id: user.id,
+      id: 'GFC*' + Date.now() + '-' + Math.floor(Math.random() * 1000),
+      createdAt: new Date().toISOString()
+    };
+    
+    console.log('Supabase insert payload:', contractToSave);
     
     const { data, error } = await window.supabase
       .from('contracts')
-      .insert([{ ...contract, user_id: user.id }])
+      .insert([contractToSave])
       .select();
     
-    if (error) throw error;
+    if (error) {
+      console.error('Supabase insert error details:', error);
+      throw error;
+    }
     return data[0];
   }
 
