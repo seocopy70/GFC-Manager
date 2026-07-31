@@ -49,11 +49,10 @@ class ContractStore {
   static async saveSettings(settings) {
     const user = await this.checkAuth();
     if (user) {
-      // upsert 시 id와 settings 필드가 profiles 테이블 스키마와 일치하는지 확인
-      // 만약 profiles 테이블에 settings 컬럼이 JSONB 타입이 아니라면 에러 발생 가능
       const { data, error } = await window.supabase
         .from('profiles')
-        .upsert({ id: user.id, settings: settings });
+        .update({ settings: settings })
+        .eq('id', user.id);
       
       if (error) {
         console.error('Supabase settings save error:', error);
@@ -650,8 +649,7 @@ class AppUI {
     this.selectClubTier.addEventListener('change', async (e) => {
       this.settings.clubTier = e.target.value;
       try { await ContractStore.saveSettings(this.settings); } catch (err) { console.error(err); }
-      this.renderKPIs();
-      this.renderChart();
+      this.renderAll();
     });
 
     this.tabAllFlow.addEventListener('click', () => {
