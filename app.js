@@ -152,6 +152,10 @@ class ContractStore {
   }
 
   static addContract(contract) {
+    // 유효성 검증
+    if (!contract.client || !contract.title || Number(contract.premium) < 0) {
+      throw new Error('필수 입력값이 누락되었거나 잘못된 형식입니다.');
+    }
     const contracts = this.getContracts();
     contract.id = 'GFC*' + Date.now() + '-' + Math.floor(Math.random() * 1000);
     contract.createdAt = new Date().toISOString();
@@ -180,20 +184,19 @@ class ContractStore {
     // 데이터 정제: undefined/null 값 제거 및 타입 변환
     const contractToSave = {
       user_id: user.id,
-      id: 'GFC*' + Date.now() + '-' + Math.floor(Math.random() * 1000),
-      createdAt: new Date().toISOString(),
-      contractType: contract.contractType || '진성계약',
+      created_at: new Date().toISOString(),
+      contract_type: contract.contractType || '진성계약',
       status: contract.status || '정상유지',
-      terminationMonth: Number(contract.terminationMonth) || 0,
-      productGroup: contract.productGroup || '건강/상해보험',
+      termination_month: Number(contract.terminationMonth) || 0,
+      product_group: contract.productGroup || '건강/상해보험',
       client: contract.client || '',
       company: contract.company || '삼성생명',
       title: contract.title || '',
-      startDate: contract.startDate || new Date().toISOString().split('T')[0],
+      start_date: contract.startDate || new Date().toISOString().split('T')[0],
       premium: Number(contract.premium) || 0,
-      paymentYears: Number(contract.paymentYears) || 20,
+      payment_years: Number(contract.paymentYears) || 20,
       tp: Number(contract.tp) || 0,
-      surrenderValue16: Number(contract.surrenderValue16) || 0,
+      surrender_value_16: Number(contract.surrenderValue16) || 0,
       promotions: contract.promotions || [],
       memo: contract.memo || ''
     };
@@ -216,9 +219,26 @@ class ContractStore {
     const user = await this.checkAuth();
     if (!user) throw new Error('로그인이 필요합니다.');
     
+    const contractToUpdate = {
+      contract_type: contract.contractType,
+      status: contract.status,
+      termination_month: contract.terminationMonth,
+      product_group: contract.productGroup,
+      client: contract.client,
+      company: contract.company,
+      title: contract.title,
+      start_date: contract.startDate,
+      premium: contract.premium,
+      payment_years: contract.paymentYears,
+      tp: contract.tp,
+      surrender_value_16: contract.surrenderValue16,
+      promotions: contract.promotions,
+      memo: contract.memo
+    };
+
     const { data, error } = await window.supabase
       .from('contracts')
-      .update({ ...contract })
+      .update(contractToUpdate)
       .eq('id', contract.id)
       .eq('user_id', user.id)
       .select();
@@ -340,7 +360,7 @@ class GfcAdvancedEngine {
   }
 
   static getNewPlannerSupport(tenureMonth, monthlyTP) {
-    if (tenureMonth > 24) return 0;
+    if (tenureMonth > 24 || monthlyTP <= 0) return 0;
 
     let baseSettlement = 0;
     if (monthlyTP >= 700000) baseSettlement = 2300000;
@@ -528,7 +548,7 @@ class AppUI {
     this.currentFilter = 'all';
     this.searchTerm = '';
     this.currentChartTab = 'all';
-    this.settings = ContractStore.getSettings();
+    this.settings = { joinDate: '2025-01', clubTier: 'club_350' };
 
     this.initElements();
     this.bindEvents();
@@ -591,8 +611,8 @@ class AppUI {
     this.btnCancelModal.addEventListener('click', () => this.closeModal());
     this.btnAddPromo.addEventListener('click', () => this.addPromoRow());
 
-    this.btnOpenRulesModal.addEventListener('click', () => this.rulesModal.classList.remove('hidden'));
-    this.btnCloseRulesModal.addEventListener('click', () => this.rulesModal.classList.add('hidden'));
+    if (this.btnOpenRulesModal) this.btnOpenRulesModal.addEventListener('click', () => this.rulesModal.classList.remove('hidden'));
+    if (this.btnCloseRulesModal) this.btnCloseRulesModal.addEventListener('click', () => this.rulesModal.classList.add('hidden'));
 
     this.btnCloseDetailModal.addEventListener('click', () => this.detailModal.classList.add('hidden'));
 
@@ -621,15 +641,15 @@ class AppUI {
       }
     });
 
-    this.plannerJoinInput.addEventListener('change', (e) => {
+    this.plannerJoinInput.addEventListener('change', async (e) => {
       this.settings.joinDate = e.target.value;
-      ContractStore.saveSettings(this.settings);
+      try { await ContractStore.saveSettings(this.settings); } catch (err) { console.error(err); }
       this.renderAll();
     });
 
-    this.selectClubTier.addEventListener('change', (e) => {
+    this.selectClubTier.addEventListener('change', async (e) => {
       this.settings.clubTier = e.target.value;
-      ContractStore.saveSettings(this.settings);
+      try { await ContractStore.saveSettings(this.settings); } catch (err) { console.error(err); }
       this.renderKPIs();
       this.renderChart();
     });
@@ -669,14 +689,14 @@ class AppUI {
 
     this.chartRangeSelect.addEventListener('change', () => this.renderChart());
 
-    this.btnSampleData.addEventListener('click', () => {
+    if (this.btnSampleData) this.btnSampleData.addEventListener('click', () => {
       if (confirm('클럽 등급 직접선택 샘플 데이터로 로드하시겠습니까?')) {
         this.contracts = ContractStore.generateSampleData();
         this.renderAll();
       }
     });
 
-    this.btnMigrate.addEventListener('click', async () => {
+    if (this.btnMigrate) this.btnMigrate.addEventListener('click', async () => {
       const localContracts = ContractStore.getContracts();
       if (localContracts.length === 0) {
         alert('마이그레이션할 로컬 데이터가 없습니다.');
@@ -703,30 +723,26 @@ class AppUI {
       }
     });
 
-    this.btnExport.addEventListener('click', () => this.exportData());
-    this.importFileInput.addEventListener('change', (e) => this.importData(e));
+    if (this.btnExport) this.btnExport.addEventListener('click', () => this.exportData());
+    if (this.importFileInput) this.importFileInput.addEventListener('change', (e) => this.importData(e));
   }
 
   async loadDataAndRender() {
     try {
+      this.settings = await ContractStore.getSettings();
       const user = await ContractStore.checkAuth();
       if (user) {
-        document.getElementById('login-container').classList.add('hidden');
-        document.getElementById('auth-container').classList.remove('hidden');
         document.getElementById('user-email').textContent = user.email;
-        
         this.contracts = await ContractStore.getContractsFromSupabase();
-        
-        if (this.settings.joinDate) this.plannerJoinInput.value = this.settings.joinDate;
-        if (this.settings.clubTier) this.selectClubTier.value = this.settings.clubTier;
       } else {
-        document.getElementById('login-container').classList.remove('hidden');
-        document.getElementById('auth-container').classList.add('hidden');
         this.contracts = [];
       }
     } catch (e) {
       console.error('Auth check failed:', e);
     }
+
+    if (this.settings.joinDate) this.plannerJoinInput.value = this.settings.joinDate;
+    if (this.settings.clubTier) this.selectClubTier.value = this.settings.clubTier;
 
     this.renderAll();
   }
@@ -1423,6 +1439,7 @@ class AppUI {
       }
       alert('데이터가 Supabase 에 저장되었습니다.');
       this.contracts = await ContractStore.getContractsFromSupabase();
+      this.settings = await ContractStore.getSettings();
       this.closeModal();
       this.renderAll();
     } catch (e) {
