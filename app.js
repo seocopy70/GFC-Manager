@@ -51,8 +51,7 @@ class ContractStore {
     if (user) {
       const { data, error } = await window.supabase
         .from('profiles')
-        .update({ settings: settings })
-        .eq('id', user.id);
+        .upsert({ id: user.id, settings: settings });
       
       if (error) {
         console.error('Supabase settings save error:', error);
@@ -69,11 +68,27 @@ class ContractStore {
   }
 
   static async login(email, password) {
+    if (!email || !password) {
+      throw new Error('이메일과 비밀번호를 모두 입력해주세요.');
+    }
     if (!window.supabase) {
       console.error('Supabase 객체 없음:', window.supabase);
       throw new Error('Supabase가 초기화되지 않았습니다.');
     }
     const { data, error } = await window.supabase.auth.signInWithPassword({ email, password });
+    if (error) throw error;
+    return data;
+  }
+
+  static async signup(email, password) {
+    if (!email || !password) {
+      throw new Error('이메일과 비밀번호를 모두 입력해주세요.');
+    }
+    if (!window.supabase) {
+      console.error('Supabase 객체 없음:', window.supabase);
+      throw new Error('Supabase가 초기화되지 않았습니다.');
+    }
+    const { data, error } = await window.supabase.auth.signUp({ email, password });
     if (error) throw error;
     return data;
   }
@@ -555,6 +570,15 @@ class AppUI {
   }
 
   initElements() {
+    this.loginOverlay = document.getElementById('login-overlay');
+    this.mainHeader = document.getElementById('main-header');
+    this.loginEmail = document.getElementById('login-email');
+    this.loginPassword = document.getElementById('login-password');
+    this.signupInviteCode = document.getElementById('signup-invite-code');
+    this.btnLogin = document.getElementById('btn-login');
+    this.btnToggleSignup = document.getElementById('btn-toggle-signup');
+    this.isSignupMode = false;
+
     this.kpiTotalCount = document.getElementById('kpi-total-count');
     this.kpiContractBreakdown = document.getElementById('kpi-contract-breakdown');
     this.kpiRealIncome = document.getElementById('kpi-real-income');
@@ -605,6 +629,14 @@ class AppUI {
       location.reload();
     });
 
+    this.btnLogin.addEventListener('click', () => this.handleLoginOrSignup());
+    [this.loginEmail, this.loginPassword].forEach(input => {
+      input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') this.handleLoginOrSignup();
+      });
+    });
+    this.btnToggleSignup.addEventListener('click', () => this.toggleSignupMode());
+
     this.btnOpenModal.addEventListener('click', () => this.openModal());
     this.btnCloseModal.addEventListener('click', () => this.closeModal());
     this.btnCancelModal.addEventListener('click', () => this.closeModal());
@@ -640,16 +672,16 @@ class AppUI {
       }
     });
 
-    this.plannerJoinInput.addEventListener('change', async (e) => {
+    this.plannerJoinInput.addEventListener('input', async (e) => {
       this.settings.joinDate = e.target.value;
-      try { await ContractStore.saveSettings(this.settings); } catch (err) { console.error(err); }
       this.renderAll();
+      try { await ContractStore.saveSettings(this.settings); } catch (err) { console.error(err); }
     });
 
     this.selectClubTier.addEventListener('change', async (e) => {
       this.settings.clubTier = e.target.value;
-      try { await ContractStore.saveSettings(this.settings); } catch (err) { console.error(err); }
       this.renderAll();
+      try { await ContractStore.saveSettings(this.settings); } catch (err) { console.error(err); }
     });
 
     this.tabAllFlow.addEventListener('click', () => {
@@ -726,23 +758,77 @@ class AppUI {
   }
 
   async loadDataAndRender() {
+    let user = null;
     try {
-      this.settings = await ContractStore.getSettings();
-      const user = await ContractStore.checkAuth();
-      if (user) {
-        document.getElementById('user-email').textContent = user.email;
-        this.contracts = await ContractStore.getContractsFromSupabase();
-      } else {
-        this.contracts = [];
-      }
+      user = await ContractStore.checkAuth();
     } catch (e) {
       console.error('Auth check failed:', e);
+    }
+
+    if (!user) {
+      this.showLoginOverlay();
+      return;
+    }
+
+    await this.enterApp(user);
+  }
+
+  showLoginOverlay() {
+    this.loginOverlay.classList.remove('hidden');
+    this.mainHeader.classList.add('hidden');
+  }
+
+  async enterApp(user) {
+    this.loginOverlay.classList.add('hidden');
+    this.mainHeader.classList.remove('hidden');
+    document.getElementById('user-email').textContent = user.email;
+
+    try {
+      this.settings = await ContractStore.getSettings();
+      this.contracts = await ContractStore.getContractsFromSupabase();
+    } catch (e) {
+      console.error('데이터 로드 실패:', e);
     }
 
     if (this.settings.joinDate) this.plannerJoinInput.value = this.settings.joinDate;
     if (this.settings.clubTier) this.selectClubTier.value = this.settings.clubTier;
 
     this.renderAll();
+  }
+
+  toggleSignupMode() {
+    this.isSignupMode = !this.isSignupMode;
+    if (this.isSignupMode) {
+      this.btnLogin.textContent = '가입하기';
+      this.btnToggleSignup.textContent = '로그인 화면으로 돌아가기';
+      this.signupInviteCode.classList.remove('hidden');
+    } else {
+      this.btnLogin.textContent = '로그인';
+      this.btnToggleSignup.textContent = '가입하기';
+      this.signupInviteCode.classList.add('hidden');
+    }
+  }
+
+  async handleLoginOrSignup() {
+    const email = this.loginEmail.value.trim();
+    const password = this.loginPassword.value;
+
+    this.btnLogin.disabled = true;
+    try {
+      if (this.isSignupMode) {
+        await ContractStore.signup(email, password);
+        alert('가입이 완료되었습니다. 이메일 인증이 필요할 수 있습니다. 인증 후 로그인해주세요.');
+        this.toggleSignupMode();
+      } else {
+        const { user } = await ContractStore.login(email, password);
+        await this.enterApp(user);
+      }
+    } catch (e) {
+      console.error('Login/signup error:', e);
+      alert((this.isSignupMode ? '가입 실패: ' : '로그인 실패: ') + e.message);
+    } finally {
+      this.btnLogin.disabled = false;
+    }
   }
 
   renderAll() {
@@ -1310,7 +1396,7 @@ class AppUI {
 
     this.detailModalTitle.textContent = `자기계약 수지분석 상세 — ${c.title}`;
     this.detailModalBody.innerHTML = htmlContent;
-    this.detailModal.classList.add('hidden');
+    this.detailModal.classList.remove('hidden');
     lucide.createIcons();
   }
 
