@@ -36,7 +36,10 @@ class ContractStore {
         .select('settings')
         .eq('id', user.id)
         .single();
-      if (data && data.settings) return data.settings;
+      if (error) console.error('Supabase 설정 로드 에러:', error);
+      // 로그인 상태에서는 Supabase가 유일한 기준 — 계정 간 localStorage 공유로 인한
+      // 설정(위촉연월/클럽등급) 혼선을 막기 위해 로컬 폴백을 쓰지 않음
+      return (data && data.settings) ? data.settings : { joinDate: '2025-01', clubTier: 'club_350' };
     }
     try {
       const data = localStorage.getItem(this.STORAGE_KEY + '_settings');
@@ -49,7 +52,7 @@ class ContractStore {
   static async saveSettings(settings) {
     const user = await this.checkAuth();
     if (user) {
-      const { data, error } = await window.supabase
+      const { error } = await window.supabase
         .from('profiles')
         .upsert({ id: user.id, settings: settings });
       
@@ -57,6 +60,7 @@ class ContractStore {
         console.error('Supabase settings save error:', error);
         throw new Error('Supabase 설정 저장 실패: ' + error.message);
       }
+      return; // 로그인 상태에서는 localStorage에 쓰지 않음 (계정 간 데이터 혼선 방지)
     }
     localStorage.setItem(this.STORAGE_KEY + '_settings', JSON.stringify(settings));
   }
@@ -99,17 +103,45 @@ class ContractStore {
     }
   }
 
+  // Supabase row(snake_case) -> 앱 내부 모델(camelCase) 변환
+  static mapFromDb(row) {
+    if (!row) return row;
+    return {
+      id: row.id,
+      userId: row.user_id,
+      createdAt: row.created_at,
+      contractType: row.contract_type,
+      status: row.status,
+      terminationMonth: row.termination_month,
+      productGroup: row.product_group,
+      client: row.client,
+      company: row.company,
+      title: row.title,
+      startDate: row.start_date,
+      premium: row.premium,
+      paymentYears: row.payment_years,
+      tp: row.tp,
+      surrenderValue16: row.surrender_value_16,
+      promotions: row.promotions || [],
+      memo: row.memo
+    };
+  }
+
   // Supabase 연동 메서드 (사용자별 데이터 필터링)
   static async getContractsFromSupabase() {
+    const user = await this.checkAuth();
+    if (!user) return [];
+
     const { data, error } = await window.supabase
       .from('contracts')
-      .select('*');
+      .select('*')
+      .eq('user_id', user.id);
     
     if (error) {
       console.error('Supabase 데이터 로드 에러:', error);
       return [];
     }
-    return data || [];
+    return (data || []).map(row => this.mapFromDb(row));
   }
 
   static async syncToSupabase(contract) {
@@ -226,7 +258,7 @@ class ContractStore {
       console.error('Supabase insert error details:', error);
       throw new Error('계약 저장 실패: ' + error.message);
     }
-    return data[0];
+    return this.mapFromDb(data[0]);
   }
 
   static async updateContractToSupabase(contract) {
@@ -258,7 +290,7 @@ class ContractStore {
       .select();
     
     if (error) throw error;
-    return data[0];
+    return this.mapFromDb(data[0]);
   }
 
   static async deleteContractFromSupabase(id) {
@@ -343,6 +375,34 @@ class GfcAdvancedEngine {
     return Math.max(1, diffMonths);
   }
 
+  // 두 날짜 사이의 개월 수 차이 (a가 b보다 이전이면 음수)
+  static monthDiff(a, b) {
+    return (a.getFullYear() - b.getFullYear()) * 12 + (a.getMonth() - b.getMonth());
+  }
+
+  // 첫 계약 시작월(또는 등록일) 중 가장 이른 달을 반환. 데이터가 없으면 오늘.
+  static getEarliestRelevantMonth(contracts, joinDateStr) {
+    const today = new Date();
+    let earliest = new Date(today.getFullYear(), today.getMonth(), 1);
+
+    if (joinDateStr) {
+      const [jY, jM] = joinDateStr.split('-').map(Number);
+      if (jY && jM) {
+        const joinDate = new Date(jY, jM - 1, 1);
+        if (joinDate < earliest) earliest = joinDate;
+      }
+    }
+
+    (contracts || []).forEach(c => {
+      if (!c.startDate) return;
+      const d = new Date(c.startDate);
+      const monthStart = new Date(d.getFullYear(), d.getMonth(), 1);
+      if (monthStart < earliest) earliest = monthStart;
+    });
+
+    return earliest;
+  }
+
   static getClubBonusParams(clubTierKey) {
     switch (clubTierKey) {
       case 'consultant': return { name: '일반 컨설턴트 (무 Club)', rate: 0.40 };
@@ -376,11 +436,14 @@ class GfcAdvancedEngine {
   static getNewPlannerSupport(tenureMonth, monthlyTP) {
     if (tenureMonth > 24 || monthlyTP <= 0) return 0;
 
+    // 정착수수료(4.2)는 1~11차월에만 지급됨. 12~24차월은 신인성과보너스만 지급.
     let baseSettlement = 0;
-    if (monthlyTP >= 700000) baseSettlement = 2300000;
-    else if (monthlyTP >= 500000) baseSettlement = 2100000;
-    else if (monthlyTP >= 300000) baseSettlement = 1500000;
-    else baseSettlement = 500000;
+    if (tenureMonth <= 11) {
+      if (monthlyTP >= 700000) baseSettlement = 2300000;
+      else if (monthlyTP >= 500000) baseSettlement = 2100000;
+      else if (monthlyTP >= 300000) baseSettlement = 1500000;
+      else baseSettlement = 500000;
+    }
 
     let perfBonus = 0;
     if (tenureMonth <= 11) {
@@ -411,20 +474,21 @@ class GfcAdvancedEngine {
     }
   }
 
-  static calculateMonthlySchedule(contract, horizonMonths = 24, joinDateStr = '2025-01') {
+  static calculateMonthlySchedule(contract, horizonMonths = 24, joinDateStr = '2025-01', baseDate = null) {
     const schedule = [];
     const startDate = new Date(contract.startDate);
-    const today = new Date();
-    
+    const actualToday = new Date();
+    const rangeStart = baseDate instanceof Date ? baseDate : actualToday;
+
     const premium = Number(contract.premium) || 0;
-    const isSenior = this.calculateTenureMonth(joinDateStr, today) > 24;
+    const isSenior = this.calculateTenureMonth(joinDateStr, actualToday) > 24;
     const feeRates = this.getFeeSchedule(contract.productGroup, isSenior);
     const promotions = contract.promotions || [];
     const status = contract.status || '정상유지';
     const terminationMonth = Number(contract.terminationMonth) || 6;
 
     for (let m = 0; m < horizonMonths; m++) {
-      const monthDate = new Date(today.getFullYear(), today.getMonth() + m, 1);
+      const monthDate = new Date(rangeStart.getFullYear(), rangeStart.getMonth() + m, 1);
       const elapsedMonths = (monthDate.getFullYear() - startDate.getFullYear()) * 12 + (monthDate.getMonth() - startDate.getMonth());
       
       let commissionIncome = 0;
@@ -472,7 +536,8 @@ class GfcAdvancedEngine {
       }
 
       const totalGrossIncome = commissionIncome + promoIncome - clawbackAmount;
-      const employmentInsDeduction = Math.round(Math.max(0, totalGrossIncome) * 0.008);
+      // 고용보험료 공제(0.8%)는 월 보수 80만원 이상일 때만 적용
+      const employmentInsDeduction = totalGrossIncome >= 800000 ? Math.round(totalGrossIncome * 0.008) : 0;
       const netIncome = totalGrossIncome - employmentInsDeduction;
 
       schedule.push({
@@ -493,10 +558,10 @@ class GfcAdvancedEngine {
     return schedule;
   }
 
-  static calculateAggregatedCashflow(contracts, horizonMonths = 24, joinDateStr = '2025-01', clubKey = 'club_350', onlySelf = false) {
+  static calculateAggregatedCashflow(contracts, horizonMonths = 24, joinDateStr = '2025-01', clubKey = 'club_350', onlySelf = false, baseDate = null) {
+    const rangeStart = baseDate instanceof Date ? baseDate : new Date();
     const result = Array.from({ length: horizonMonths }, (_, m) => {
-      const today = new Date();
-      const targetDate = new Date(today.getFullYear(), today.getMonth() + m, 1);
+      const targetDate = new Date(rangeStart.getFullYear(), rangeStart.getMonth() + m, 1);
       const tenureMonth = this.calculateTenureMonth(joinDateStr, targetDate);
 
       let monthlyTP = 0;
@@ -537,7 +602,7 @@ class GfcAdvancedEngine {
     contracts.forEach(contract => {
       if (onlySelf && contract.contractType !== '자기계약') return;
 
-      const schedule = this.calculateMonthlySchedule(contract, horizonMonths, joinDateStr);
+      const schedule = this.calculateMonthlySchedule(contract, horizonMonths, joinDateStr, rangeStart);
       schedule.forEach((item, idx) => {
         if (item.contractType === '진성계약') {
           result[idx].realIncome += item.netIncome;
@@ -1030,7 +1095,15 @@ class AppUI {
     const horizon = Number(this.chartRangeSelect.value) || 24;
     const clubKey = this.selectClubTier.value || 'club_350';
     const onlySelf = (this.currentChartTab === 'self');
-    const aggregated = GfcAdvancedEngine.calculateAggregatedCashflow(this.contracts, horizon, this.settings.joinDate, clubKey, onlySelf);
+
+    // 첫 계약(또는 등록일) 시작월부터 과거 데이터도 함께 보여줌
+    const now = new Date();
+    const todayMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    const baseDate = GfcAdvancedEngine.getEarliestRelevantMonth(this.contracts, this.settings.joinDate);
+    const pastMonths = Math.max(0, GfcAdvancedEngine.monthDiff(todayMonth, baseDate));
+    const totalHorizon = pastMonths + horizon;
+
+    const aggregated = GfcAdvancedEngine.calculateAggregatedCashflow(this.contracts, totalHorizon, this.settings.joinDate, clubKey, onlySelf, baseDate);
 
     const labels = aggregated.map(d => d.monthLabel);
     const realIncomes = aggregated.map(d => d.realIncome);
@@ -1148,17 +1221,41 @@ class AppUI {
   openDetailModal(type) {
     const clubKey = this.selectClubTier.value || 'club_350';
     const horizon = Number(this.chartRangeSelect ? this.chartRangeSelect.value : 24) || 24;
-    const aggregated = GfcAdvancedEngine.calculateAggregatedCashflow(this.contracts, horizon, this.settings.joinDate, clubKey, false);
 
-    let title = '월별 상세 수입 및 지출 예측 내역';
+    // 첫 계약(또는 등록일) 시작월부터 과거 데이터도 함께 조회 가능하도록 범위 확장
+    const now = new Date();
+    const todayMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    const baseDate = GfcAdvancedEngine.getEarliestRelevantMonth(this.contracts, this.settings.joinDate);
+    const pastMonths = Math.max(0, GfcAdvancedEngine.monthDiff(todayMonth, baseDate));
+    const totalHorizon = pastMonths + horizon;
+
+    const aggregated = GfcAdvancedEngine.calculateAggregatedCashflow(this.contracts, totalHorizon, this.settings.joinDate, clubKey, false, baseDate);
+
+    const titleMap = {
+      income: '당월 총수입 (수수료+시책+보너스) 상세 내역',
+      expense: '당월 자기계약 보험료 지출 상세 내역',
+      net: '당월 최종 순손익 산출 내역'
+    };
+    let title = titleMap[type] || '월별 상세 수입 및 지출 예측 내역';
 
     const renderMonthDetail = (mIdx) => {
       const item = aggregated[mIdx] || aggregated[0];
-      const targetDate = new Date();
-      targetDate.setMonth(targetDate.getMonth() + mIdx);
+      const targetDate = new Date(baseDate.getFullYear(), baseDate.getMonth() + mIdx, 1);
       const tMonth = GfcAdvancedEngine.calculateTenureMonth(this.settings.joinDate, targetDate);
       const isSen = tMonth > 24;
 
+      // 당월 "신규" TP (그 달에 시작된 계약만) — KPI 집계 엔진(calculateAggregatedCashflow)과
+      // 동일한 기준이어야 지원금 합계가 일치함. 정착수수료/성과보너스는 신규 TP 기준으로 산정됨.
+      let newContractTP = 0;
+      this.contracts.forEach(c => {
+        if (c.status !== '정상유지') return;
+        const startDate = new Date(c.startDate);
+        if (startDate.getFullYear() === targetDate.getFullYear() && startDate.getMonth() === targetDate.getMonth()) {
+          newContractTP += (Number(c.tp) || 0);
+        }
+      });
+
+      // 당월 수수료·시책이 발생하는 계약들의 TP 합계 (1~15회차 진행 중인 전체 계약, 표시용)
       let totalTP = 0;
       let contractRows = this.contracts.map(c => {
         if (c.status !== '정상유지') return '';
@@ -1171,15 +1268,12 @@ class AppUI {
 
         const feeRates = GfcAdvancedEngine.getFeeSchedule(c.productGroup, isSen);
         const rate = feeRates[elapsed] || 0;
-        const comm = (Number(c.premium) || 0) * (rate / 100);
 
-        let promo = 0;
-        (c.promotions || []).forEach(p => {
-          if ((Number(p.afterPaymentMonth) || 1) === (elapsed + 1)) {
-            let val = Number(p.value) || 0;
-            promo += (p.type === 'percent' ? (Number(c.premium) || 0) * (val / 100) : val);
-          }
-        });
+        // 실제 KPI/차트 집계와 완전히 동일한 엔진 함수를 그대로 재사용 (수수료/시책 시점 계산 이중 구현 방지)
+        const contractSchedule = GfcAdvancedEngine.calculateMonthlySchedule(c, mIdx + 1, this.settings.joinDate, baseDate);
+        const monthData = contractSchedule[mIdx] || { commissionIncome: 0, promoIncome: 0 };
+        const comm = monthData.commissionIncome;
+        const promo = monthData.promoIncome;
 
         return `
           <div class="p-3 bg-white rounded-xl border border-slate-200 text-xs space-y-1">
@@ -1197,50 +1291,53 @@ class AppUI {
 
       let bonusBreakdown = '';
       if (!isSen) {
+        // 정착수수료(4.2)는 1~11차월에만 지급됨
         let baseSettlement = 0;
-        if (totalTP >= 700000) baseSettlement = 2300000;
-        else if (totalTP >= 500000) baseSettlement = 2100000;
-        else if (totalTP >= 300000) baseSettlement = 1500000;
-        else baseSettlement = 500000;
+        if (tMonth <= 11) {
+          if (newContractTP >= 700000) baseSettlement = 2300000;
+          else if (newContractTP >= 500000) baseSettlement = 2100000;
+          else if (newContractTP >= 300000) baseSettlement = 1500000;
+          else if (newContractTP > 0) baseSettlement = 500000;
+        }
 
         let perfBonus = 0;
         if (tMonth <= 11) {
-          if (totalTP >= 1000000) perfBonus = 1900000 + (totalTP - 1000000) * 1.5;
-          else if (totalTP >= 700000) perfBonus = 1400000;
-          else if (totalTP >= 500000) perfBonus = 1000000;
-          else if (totalTP >= 400000) perfBonus = 500000;
-          else if (totalTP >= 300000) perfBonus = 400000;
+          if (newContractTP >= 1000000) perfBonus = 1900000 + (newContractTP - 1000000) * 1.5;
+          else if (newContractTP >= 700000) perfBonus = 1400000;
+          else if (newContractTP >= 500000) perfBonus = 1000000;
+          else if (newContractTP >= 400000) perfBonus = 500000;
+          else if (newContractTP >= 300000) perfBonus = 400000;
         } else {
-          if (totalTP >= 1000000) perfBonus = 2100000 + (totalTP - 1000000) * 1.5;
-          else if (totalTP >= 700000) perfBonus = 1600000;
-          else if (totalTP >= 500000) perfBonus = 1350000;
-          else if (totalTP >= 400000) perfBonus = 1000000;
-          else if (totalTP >= 300000) perfBonus = 900000;
+          if (newContractTP >= 1000000) perfBonus = 2100000 + (newContractTP - 1000000) * 1.5;
+          else if (newContractTP >= 700000) perfBonus = 1600000;
+          else if (newContractTP >= 500000) perfBonus = 1350000;
+          else if (newContractTP >= 400000) perfBonus = 1000000;
+          else if (newContractTP >= 300000) perfBonus = 900000;
         }
 
         bonusBreakdown = `
           <div class="p-3.5 bg-emerald-50 rounded-xl border border-emerald-200 text-xs text-emerald-900 space-y-1.5">
-            <p class="font-bold text-sm">✨ 신인 GFC 지원금 세부 구성 (${tMonth}차월)</p>
-            <div class="flex justify-between"><span>기본 정착수수료:</span> <strong>+${baseSettlement.toLocaleString()}원</strong></div>
+            <p class="font-bold text-sm">✨ 신인 GFC 지원금 세부 구성 (${tMonth}차월 | 당월 신규 TP: ${newContractTP.toLocaleString()}원)</p>
+            <div class="flex justify-between"><span>기본 정착수수료 ${tMonth > 11 ? '(1~11차월만 지급)' : ''}:</span> <strong>+${baseSettlement.toLocaleString()}원</strong></div>
             <div class="flex justify-between"><span>성과보너스 (업적 연동):</span> <strong>+${Math.round(perfBonus).toLocaleString()}원</strong></div>
             <div class="border-t border-emerald-200 pt-1.5 flex justify-between font-bold text-emerald-800 text-sm"><span>지원금 합계:</span> <strong>+${item.realIncome.toLocaleString()}원</strong></div>
           </div>
         `;
       } else {
-        let achBonus = totalTP >= 300000 ? totalTP * 2.0 : totalTP * 0.7;
+        let achBonus = newContractTP >= 300000 ? newContractTP * 2.0 : newContractTP * 0.7;
         let clubParams = GfcAdvancedEngine.getClubBonusParams(clubKey);
-        let clubBonus = Math.min(5000000, totalTP * clubParams.rate);
+        let clubBonus = Math.min(5000000, newContractTP * clubParams.rate);
         let myungInBonus = 0;
-        if (totalTP > 5000000) {
-          let excess = totalTP - 5000000;
+        if (newContractTP > 5000000) {
+          let excess = newContractTP - 5000000;
           let mRate = clubKey === 'club_350' ? 1.0 : (clubKey === 'club_230' ? 0.95 : 0);
           myungInBonus = Math.min(5000000, excess * mRate);
         }
 
         bonusBreakdown = `
           <div class="p-3.5 bg-emerald-50 rounded-xl border border-emerald-200 text-xs text-emerald-900 space-y-1.5">
-            <p class="font-bold text-sm">✨ 시니어 성과보너스 세부 구성 (${clubParams.name})</p>
-            <div class="flex justify-between"><span>업적분 (${totalTP >= 300000 ? '200%' : '70%'}):</span> <strong>+${Math.round(achBonus).toLocaleString()}원</strong></div>
+            <p class="font-bold text-sm">✨ 시니어 성과보너스 세부 구성 (${clubParams.name} | 당월 신규 TP: ${newContractTP.toLocaleString()}원)</p>
+            <div class="flex justify-between"><span>업적분 (${newContractTP >= 300000 ? '200%' : '70%'}):</span> <strong>+${Math.round(achBonus).toLocaleString()}원</strong></div>
             <div class="flex justify-between"><span>클럽분 (${clubParams.name} ${clubParams.rate * 100}%):</span> <strong>+${Math.round(clubBonus).toLocaleString()}원</strong></div>
             ${myungInBonus > 0 ? `<div class="flex justify-between"><span>초과 명인보너스:</span> <strong>+${Math.round(myungInBonus).toLocaleString()}원</strong></div>` : ''}
             <div class="border-t border-emerald-200 pt-1.5 flex justify-between font-bold text-emerald-800 text-sm"><span>보너스 합계:</span> <strong>+${item.realIncome.toLocaleString()}원</strong></div>
@@ -1267,63 +1364,90 @@ class AppUI {
         `;
       }).filter(Boolean).join('');
 
+      const monthSelector = `
+        <div class="flex items-center justify-between bg-slate-100 p-3 rounded-xl">
+          <label class="font-bold text-slate-700 text-xs">조회 월 선택 (첫 계약월부터 향후 ${horizon}개월까지):</label>
+          <select id="detail-month-selector" class="px-3 py-1.5 bg-white border border-slate-300 rounded-lg text-xs font-bold text-emerald-700 focus:ring-2 focus:ring-emerald-500">
+            ${aggregated.map((d, i) => `<option value="${i}" ${i === mIdx ? 'selected' : ''}>${d.monthLabel}${i === pastMonths ? ' (이번달)' : ''}</option>`).join('')}
+          </select>
+        </div>
+      `;
+
+      const summaryBoxes = `
+        <div class="grid grid-cols-3 gap-2 text-center">
+          <div class="p-3 rounded-xl border ${type === 'income' ? 'bg-emerald-100 border-emerald-400 ring-2 ring-emerald-400' : 'bg-emerald-50 border-emerald-200'}">
+            <span class="text-[10px] text-slate-500 block">당월 총수입</span>
+            <strong class="text-emerald-700 text-sm">+${item.totalIncome.toLocaleString()}원</strong>
+          </div>
+          <div class="p-3 rounded-xl border ${type === 'expense' ? 'bg-rose-100 border-rose-400 ring-2 ring-rose-400' : 'bg-rose-50 border-rose-200'}">
+            <span class="text-[10px] text-slate-500 block">자기계약 보험료지출</span>
+            <strong class="text-rose-600 text-sm">-${item.selfExpense.toLocaleString()}원</strong>
+          </div>
+          <div class="p-3 rounded-xl border ${type === 'net' ? 'bg-blue-100 border-blue-400 ring-2 ring-blue-400' : 'bg-blue-50 border-blue-200'}">
+            <span class="text-[10px] text-slate-500 block">최종 순손익</span>
+            <strong class="text-blue-700 text-sm">${item.netProfit >= 0 ? '+' : ''}${item.netProfit.toLocaleString()}원</strong>
+          </div>
+        </div>
+      `;
+
+      const incomeSection = `
+        ${bonusBreakdown}
+        <div>
+          <h4 class="font-bold text-slate-800 mb-2 text-xs">해당 월 계약별 수수료 및 시책 상세 (수수료 발생 계약 TP 합계: ${totalTP.toLocaleString()}원)</h4>
+          <div class="space-y-2 max-h-[220px] overflow-y-auto custom-scrollbar">
+            ${contractRows || '<p class="text-slate-400 text-center py-4">해당 월에 실적이 발생하는 정상유지 계약이 없습니다.</p>'}
+          </div>
+        </div>
+      `;
+
+      const expenseSection = `
+        <div>
+          <h4 class="font-bold text-slate-800 mb-2 text-xs">해당 월 자기계약 보험료 지출 상세</h4>
+          <div class="space-y-2 max-h-[220px] overflow-y-auto custom-scrollbar">
+            ${selfExpenseDetails || '<p class="text-slate-400 text-center py-4">지출 중인 자기계약이 없습니다.</p>'}
+          </div>
+        </div>
+      `;
+
+      const netExplainer = `
+        <div class="p-3.5 bg-blue-50 rounded-xl border border-blue-200 text-xs text-blue-900">
+          <p class="font-bold text-sm mb-1">🧮 순손익 산출 방식</p>
+          <p>당월 총수입 <strong class="text-emerald-700">+${item.totalIncome.toLocaleString()}원</strong> − 자기계약 보험료 지출 <strong class="text-rose-600">-${item.selfExpense.toLocaleString()}원</strong> = 최종 순손익 <strong class="${item.netProfit >= 0 ? 'text-emerald-700' : 'text-rose-600'}">${item.netProfit >= 0 ? '+' : ''}${item.netProfit.toLocaleString()}원</strong></p>
+        </div>
+      `;
+
+      let bodySections;
+      if (type === 'income') {
+        bodySections = incomeSection;
+      } else if (type === 'expense') {
+        bodySections = expenseSection;
+      } else {
+        // 순손익: 계산식 + 수입/지출 상세를 모두 보여줌
+        bodySections = `${netExplainer}${incomeSection}${expenseSection}`;
+      }
+
       return `
         <div class="space-y-4">
-          <div class="flex items-center justify-between bg-slate-100 p-3 rounded-xl">
-            <label class="font-bold text-slate-700 text-xs">조회 월 선택 (향후 ${horizon}개월):</label>
-            <select id="detail-month-selector" class="px-3 py-1.5 bg-white border border-slate-300 rounded-lg text-xs font-bold text-emerald-700 focus:ring-2 focus:ring-emerald-500">
-              ${aggregated.map((d, i) => `<option value="${i}" ${i === mIdx ? 'selected' : ''}>${d.monthLabel} (${i + 1}번째 달)</option>`).join('')}
-            </select>
-          </div>
-
-          <div class="grid grid-cols-3 gap-2 text-center">
-            <div class="p-3 bg-emerald-50 rounded-xl border border-emerald-200">
-              <span class="text-[10px] text-slate-500 block">당월 총수입</span>
-              <strong class="text-emerald-700 text-sm">+${item.totalIncome.toLocaleString()}원</strong>
-            </div>
-            <div class="p-3 bg-rose-50 rounded-xl border border-rose-200">
-              <span class="text-[10px] text-slate-500 block">자기계약 보험료지출</span>
-              <strong class="text-rose-600 text-sm">-${item.selfExpense.toLocaleString()}원</strong>
-            </div>
-            <div class="p-3 bg-blue-50 rounded-xl border border-blue-200">
-              <span class="text-[10px] text-slate-500 block">최종 순손익</span>
-              <strong class="text-blue-700 text-sm">${item.netProfit >= 0 ? '+' : ''}${item.netProfit.toLocaleString()}원</strong>
-            </div>
-          </div>
-
-          ${bonusBreakdown}
-
-          <div>
-            <h4 class="font-bold text-slate-800 mb-2 text-xs">해당 월 계약별 수수료 및 시책 상세 (당월 TP 합계: ${totalTP.toLocaleString()}원)</h4>
-            <div class="space-y-2 max-h-[180px] overflow-y-auto custom-scrollbar">
-              ${contractRows || '<p class="text-slate-400 text-center py-4">해당 월에 실적이 발생하는 정상유지 계약이 없습니다.</p>'}
-            </div>
-          </div>
-
-          <div>
-            <h4 class="font-bold text-slate-800 mb-2 text-xs">해당 월 자기계약 보험료 지출 상세</h4>
-            <div class="space-y-2 max-h-[140px] overflow-y-auto custom-scrollbar">
-              ${selfExpenseDetails || '<p class="text-slate-400 text-center py-4">지출 중인 자기계약이 없습니다.</p>'}
-            </div>
-          </div>
+          ${monthSelector}
+          ${summaryBoxes}
+          ${bodySections}
         </div>
       `;
     };
 
     this.detailModalTitle.textContent = title;
-    this.detailModalBody.innerHTML = renderMonthDetail(0);
+    this.detailModalBody.innerHTML = renderMonthDetail(pastMonths);
     this.detailModal.classList.remove('hidden');
 
-    const selector = document.getElementById('detail-month-selector');
-    if (selector) {
-      selector.addEventListener('change', (e) => {
+    // detail-month-selector는 매번 innerHTML로 새로 생성되므로, 사라지지 않는
+    // 부모(detailModalBody)에 위임 방식으로 리스너를 걸어야 두 번째 이후 변경도 동작함
+    this.detailModalBody.onchange = (e) => {
+      if (e.target && e.target.id === 'detail-month-selector') {
         const idx = Number(e.target.value);
         this.detailModalBody.innerHTML = renderMonthDetail(idx);
-        const newSelector = document.getElementById('detail-month-selector');
-        if (newSelector) newSelector.value = idx;
         lucide.createIcons();
-      });
-    }
+      }
+    };
 
     lucide.createIcons();
   }
@@ -1428,11 +1552,15 @@ class AppUI {
     document.getElementById('form-id').value = '';
     this.terminationWrapper.classList.add('hidden');
 
+    const surrenderInput = document.getElementById('form-surrenderValue16');
+
     if (contractId) {
       const contract = this.contracts.find(c => c.id === contractId);
       if (contract) {
         this.modalTitle.textContent = '보험계약 수정 (상태 및 환수 관리)';
         document.getElementById('form-id').value = contract.id;
+        // 기존 계약 수정 시엔 이미 기록된 해약환급금 값을 보존하고, 보험료를 고쳐도 자동계산으로 덮어쓰지 않음
+        surrenderInput.dataset.manual = 'true';
         
         const radios = this.contractForm.elements['contractType'];
         for (let r of radios) {
@@ -1468,6 +1596,8 @@ class AppUI {
       document.getElementById('form-productGroup').value = '건강/상해보험';
       document.getElementById('form-paymentYears').value = 20;
       document.getElementById('form-status').value = '정상유지';
+      surrenderInput.value = 0;
+      surrenderInput.dataset.manual = 'false';
       this.addPromoRow({ type: 'percent', value: 300, afterPaymentMonth: 1 });
     }
 
