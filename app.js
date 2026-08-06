@@ -6,63 +6,33 @@
  * Updated with Independent Monthly TP Calculation, Detailed Multi-month Cashflow & Self Analysis.
  */
 
-// --- Data Model & Storage ---
+// --- Data Model & Storage (Supabase 전용) ---
 class ContractStore {
-  static STORAGE_KEY = 'gfc_premium_manager_v5';
-
-  static getContracts() {
-    try {
-      const data = localStorage.getItem(this.STORAGE_KEY);
-      return data ? JSON.parse(data) : [];
-    } catch (e) {
-      console.error('Failed to load contracts:', e);
-      return [];
-    }
-  }
-
-  static saveContracts(contracts) {
-    try {
-      localStorage.setItem(this.STORAGE_KEY, JSON.stringify(contracts));
-    } catch (e) {
-      console.error('Failed to save contracts:', e);
-    }
-  }
-
   static async getSettings() {
     const user = await this.checkAuth();
-    if (user) {
-      const { data, error } = await window.supabase
-        .from('profiles')
-        .select('settings')
-        .eq('id', user.id)
-        .single();
-      if (error) console.error('Supabase 설정 로드 에러:', error);
-      // 로그인 상태에서는 Supabase가 유일한 기준 — 계정 간 localStorage 공유로 인한
-      // 설정(위촉연월/클럽등급) 혼선을 막기 위해 로컬 폴백을 쓰지 않음
-      return (data && data.settings) ? data.settings : { joinDate: '2025-01', clubTier: 'club_350' };
-    }
-    try {
-      const data = localStorage.getItem(this.STORAGE_KEY + '_settings');
-      return data ? JSON.parse(data) : { joinDate: '2025-01', clubTier: 'club_350' };
-    } catch (e) {
-      return { joinDate: '2025-01', clubTier: 'club_350' };
-    }
+    if (!user) return { joinDate: '2025-01', clubTier: 'club_350' };
+
+    const { data, error } = await window.supabase
+      .from('profiles')
+      .select('settings')
+      .eq('id', user.id)
+      .single();
+    if (error) console.error('Supabase 설정 로드 에러:', error);
+    return (data && data.settings) ? data.settings : { joinDate: '2025-01', clubTier: 'club_350' };
   }
 
   static async saveSettings(settings) {
     const user = await this.checkAuth();
-    if (user) {
-      const { error } = await window.supabase
-        .from('profiles')
-        .upsert({ id: user.id, settings: settings });
-      
-      if (error) {
-        console.error('Supabase settings save error:', error);
-        throw new Error('Supabase 설정 저장 실패: ' + error.message);
-      }
-      return; // 로그인 상태에서는 localStorage에 쓰지 않음 (계정 간 데이터 혼선 방지)
+    if (!user) throw new Error('로그인이 필요합니다.');
+
+    const { error } = await window.supabase
+      .from('profiles')
+      .upsert({ id: user.id, settings: settings });
+
+    if (error) {
+      console.error('Supabase settings save error:', error);
+      throw new Error('Supabase 설정 저장 실패: ' + error.message);
     }
-    localStorage.setItem(this.STORAGE_KEY + '_settings', JSON.stringify(settings));
   }
 
   // 인증 상태 관리
@@ -155,73 +125,6 @@ class ContractStore {
     return data;
   }
 
-  // 로컬 데이터를 Supabase 로 마이그레이션
-  static async migrateLocalDataToSupabase() {
-    const user = await this.checkAuth();
-    if (!user) return { success: false, message: '로그인이 필요합니다.' };
-
-    const localContracts = this.getContracts();
-    if (localContracts.length === 0) {
-      return { success: true, message: '마이그레이션할 로컬 데이터가 없습니다.' };
-    }
-
-    try {
-      const { data: existingData } = await window.supabase
-        .from('contracts')
-        .select('id')
-        .eq('user_id', user.id);
-
-      const existingIds = new Set((existingData || []).map(d => d.id));
-
-      const contractsToInsert = localContracts.filter(c => !existingIds.has(c.id));
-
-      if (contractsToInsert.length === 0) {
-        return { success: true, message: '모든 데이터가 이미 Supabase 에 있습니다.' };
-      }
-
-      const { error: insertError } = await window.supabase
-        .from('contracts')
-        .insert(contractsToInsert.map(c => ({ ...c, user_id: user.id })));
-
-      if (insertError) {
-        console.error('Supabase insert error:', insertError);
-        return { success: false, message: 'Supabase 저장 실패: ' + insertError.message };
-      }
-
-      this.saveContracts([]);
-
-      return { success: true, message: `${contractsToInsert.length}개의 데이터를 Supabase 로 마이그레이션했습니다.` };
-    } catch (e) {
-      console.error('Migration error:', e);
-      return { success: false, message: '마이그레이션 중 오류 발생: ' + e.message };
-    }
-  }
-
-  static addContract(contract) {
-    // 유효성 검증
-    if (!contract.client || !contract.title || Number(contract.premium) < 0) {
-      throw new Error('필수 입력값이 누락되었거나 잘못된 형식입니다.');
-    }
-    const contracts = this.getContracts();
-    contract.id = 'GFC*' + Date.now() + '-' + Math.floor(Math.random() * 1000);
-    contract.createdAt = new Date().toISOString();
-    contracts.unshift(contract);
-    this.saveContracts(contracts);
-    return contract;
-  }
-
-  static updateContract(updatedContract) {
-    let contracts = this.getContracts();
-    contracts = contracts.map(c => c.id === updatedContract.id ? { ...c, ...updatedContract } : c);
-    this.saveContracts(contracts);
-  }
-
-  static deleteContract(id) {
-    let contracts = this.getContracts();
-    contracts = contracts.filter(c => c.id !== id);
-    this.saveContracts(contracts);
-  }
-
   // Supabase 연동 메서드들
   static async addContractToSupabase(contract) {
     const user = await this.checkAuth();
@@ -306,61 +209,6 @@ class ContractStore {
     if (error) throw error;
   }
 
-  static generateSampleData() {
-    const today = new Date();
-    const formatDate = (monthsAgo) => {
-      const d = new Date(today);
-      d.setMonth(d.getMonth() - monthsAgo);
-      return d.toISOString().split('T')[0];
-    };
-
-    const samples = [
-      {
-        id: 'SMP-1',
-        contractType: '진성계약',
-        status: '정상유지',
-        terminationMonth: 6,
-        productGroup: '건강/상해보험',
-        client: '김철수',
-        company: '삼성생명',
-        title: '무배당 통합건강보험',
-        startDate: formatDate(1),
-        premium: 200000,
-        paymentYears: 20,
-        tp: 240000,
-        surrenderValue16: 1200000,
-        promotions: [
-          { type: 'percent', value: 300, afterPaymentMonth: 1 }
-        ],
-        memo: '건강보험 300% 시책 (1 회차 납입 후 익월 지급)',
-        createdAt: new Date().toISOString()
-      },
-      {
-        id: 'SMP-2',
-        contractType: '자기계약',
-        status: '정상유지',
-        terminationMonth: 6,
-        productGroup: '종신/GI 보험',
-        client: '본인 (GFC)',
-        company: '삼성생명',
-        title: '무배당 경영인 종신보험 (자기)',
-        startDate: formatDate(2),
-        premium: 300000,
-        paymentYears: 10,
-        tp: 360000,
-        surrenderValue16: 2500000,
-        promotions: [
-          { type: 'amount', value: 200000, afterPaymentMonth: 1 },
-          { type: 'percent', value: 100, afterPaymentMonth: 13 }
-        ],
-        memo: '종신 자기계약 및 16 회차 해지 환급금 수지분석',
-        createdAt: new Date().toISOString()
-      }
-    ];
-
-    this.saveContracts(samples);
-    return samples;
-  }
 }
 
 // --- GFC Advanced Financial Engine (Manual Club Tier Integration with 30 만 Club) ---
@@ -463,6 +311,15 @@ class GfcAdvancedEngine {
     return Math.round(baseSettlement + perfBonus);
   }
 
+  // 회차별 수수료 환수율 (%) — "2회차 100% ~ 15회차 7% 환수표"
+  // ⚠️ 규정집 원문에는 2회차/15회차 양 끝값만 명시되어 있고 3~14회차 세부 %는 제공되지 않아
+  //    두 값을 선형보간한 추정치입니다. 실제 삼성생명 GFC 사규의 정확한 회차별 환수율을
+  //    확인해서 아래 표를 교체해 주세요.
+  static COMMISSION_CLAWBACK_TABLE = {
+    2: 100, 3: 93, 4: 86, 5: 79, 6: 71, 7: 64, 8: 57, 9: 50,
+    10: 43, 11: 36, 12: 29, 13: 21, 14: 14, 15: 7
+  };
+
   static getFeeSchedule(productGroup, isSenior = false) {
     if (!isSenior) {
       if (productGroup === '종신/GI 보험') return [112, 8,8,8,8,8,8,8,8,8,8,8, 20,20, 12];
@@ -477,11 +334,13 @@ class GfcAdvancedEngine {
   static calculateMonthlySchedule(contract, horizonMonths = 24, joinDateStr = '2025-01', baseDate = null) {
     const schedule = [];
     const startDate = new Date(contract.startDate);
-    const actualToday = new Date();
-    const rangeStart = baseDate instanceof Date ? baseDate : actualToday;
+    const rangeStart = baseDate instanceof Date ? baseDate : new Date();
 
     const premium = Number(contract.premium) || 0;
-    const isSenior = this.calculateTenureMonth(joinDateStr, actualToday) > 24;
+    // 신인/시니어 수수료 구조는 "계약 체결 시점"의 위촉차월 기준으로 고정된다.
+    // (오늘 날짜나 예측 대상월 기준으로 계산하면, 실제로는 신인 구조로 체결된 과거 계약이
+    //  플래너가 25차월을 넘긴 뒤에는 시니어 구조로 잘못 표시되는 오류가 생김)
+    const isSenior = this.calculateTenureMonth(joinDateStr, startDate) > 24;
     const feeRates = this.getFeeSchedule(contract.productGroup, isSenior);
     const promotions = contract.promotions || [];
     const status = contract.status || '정상유지';
@@ -502,12 +361,15 @@ class GfcAdvancedEngine {
       if (elapsedMonths >= 0 && elapsedMonths < 15 && !isTerminatedBeforeThisMonth) {
         const rate = feeRates[elapsedMonths] || 0;
         commissionIncome = premium * (rate / 100);
+      }
 
+      // 시책은 수수료(1~15회차)와 별개의 조건이므로, 납입회차가 15회차를 넘는 시책도
+      // (해지 전이라면) 정상적으로 지급되어야 함 — 이전 코드는 위 15개월 블록 안에 있어서
+      // 16회차 이후로 설정된 시책은 절대 지급되지 않는 버그가 있었음
+      if (!isTerminatedBeforeThisMonth) {
         promotions.forEach(promo => {
           const targetDepositMonth = Number(promo.afterPaymentMonth) || 1;
-          const payoutElapsedMonth = targetDepositMonth;
-          
-          if (elapsedMonths === payoutElapsedMonth) {
+          if (elapsedMonths === targetDepositMonth) {
             let pVal = Number(promo.value) || 0;
             let earnedPromo = promo.type === 'percent' ? premium * (pVal / 100) : pVal;
             promoIncome += earnedPromo;
@@ -515,16 +377,30 @@ class GfcAdvancedEngine {
         });
       }
 
-      if (isTerminatedThisMonth && terminationMonth < 25) {
-        let totalPromoReceived = 0;
-        promotions.forEach(promo => {
-          const targetDepositMonth = Number(promo.afterPaymentMonth) || 1;
-          if (targetDepositMonth <= terminationMonth) {
-            let pVal = Number(promo.value) || 0;
-            totalPromoReceived += (promo.type === 'percent' ? premium * (pVal / 100) : pVal);
+      if (isTerminatedThisMonth) {
+        // (1) 시책 환수: 25차월 이내 해지 시 기지급 시책의 70% 환수
+        if (terminationMonth < 25) {
+          let totalPromoReceived = 0;
+          promotions.forEach(promo => {
+            const targetDepositMonth = Number(promo.afterPaymentMonth) || 1;
+            if (targetDepositMonth <= terminationMonth) {
+              let pVal = Number(promo.value) || 0;
+              totalPromoReceived += (promo.type === 'percent' ? premium * (pVal / 100) : pVal);
+            }
+          });
+          clawbackAmount += Math.round(totalPromoReceived * 0.70);
+        }
+
+        // (2) 수수료 환수: 2~15회차 해지/실효 시 그동안 지급된 누적 수수료를 회차별 환수율로 환수
+        const terminationRound = terminationMonth + 1; // elapsedMonths(0-based) → 회차(1-based)
+        const clawbackRate = this.COMMISSION_CLAWBACK_TABLE[terminationRound] || 0;
+        if (clawbackRate > 0) {
+          let cumulativeCommission = 0;
+          for (let pastElapsed = 0; pastElapsed < terminationMonth; pastElapsed++) {
+            cumulativeCommission += premium * ((feeRates[pastElapsed] || 0) / 100);
           }
-        });
-        clawbackAmount = Math.round(totalPromoReceived * 0.70);
+          clawbackAmount += Math.round(cumulativeCommission * (clawbackRate / 100));
+        }
       }
 
       if (contract.contractType === '자기계약' && !isTerminatedBeforeThisMonth) {
@@ -681,11 +557,6 @@ class AppUI {
     this.btnCloseDetailModal = document.getElementById('btn-close-detail-modal');
     this.detailModalTitle = document.getElementById('detail-modal-title');
     this.detailModalBody = document.getElementById('detail-modal-body');
-
-    this.btnSampleData = document.getElementById('btn-sample-data');
-    this.btnExport = document.getElementById('btn-export');
-    this.btnMigrate = document.getElementById('btn-migrate');
-    this.importFileInput = document.getElementById('import-file');
   }
 
   bindEvents() {
@@ -707,8 +578,8 @@ class AppUI {
     this.btnCancelModal.addEventListener('click', () => this.closeModal());
     this.btnAddPromo.addEventListener('click', () => this.addPromoRow());
 
-    if (this.btnOpenRulesModal) this.btnOpenRulesModal.addEventListener('click', () => this.rulesModal.classList.remove('hidden'));
-    if (this.btnCloseRulesModal) this.btnCloseRulesModal.addEventListener('click', () => this.rulesModal.classList.add('hidden'));
+    this.btnOpenRulesModal.addEventListener('click', () => this.rulesModal.classList.remove('hidden'));
+    this.btnCloseRulesModal.addEventListener('click', () => this.rulesModal.classList.add('hidden'));
 
     this.btnCloseDetailModal.addEventListener('click', () => this.detailModal.classList.add('hidden'));
 
@@ -783,43 +654,6 @@ class AppUI {
     });
 
     this.chartRangeSelect.addEventListener('change', () => this.renderChart());
-
-    if (this.btnSampleData) this.btnSampleData.addEventListener('click', () => {
-      if (confirm('클럽 등급 직접선택 샘플 데이터로 로드하시겠습니까?')) {
-        this.contracts = ContractStore.generateSampleData();
-        this.renderAll();
-      }
-    });
-
-    if (this.btnMigrate) this.btnMigrate.addEventListener('click', async () => {
-      const localContracts = ContractStore.getContracts();
-      if (localContracts.length === 0) {
-        alert('마이그레이션할 로컬 데이터가 없습니다.');
-        return;
-      }
-
-      try {
-        const user = await ContractStore.checkAuth();
-        if (!user) {
-          alert('로그인이 필요합니다. 먼저 로그인해주세요.');
-          return;
-        }
-
-        if (confirm(`${localContracts.length}개의 로컬 데이터를 Supabase 로 마이그레이션하시겠습니까?\n\n마이그레이션 후 로컬 데이터는 삭제됩니다.`)) {
-          const result = await ContractStore.migrateLocalDataToSupabase();
-          alert(result.message);
-          if (result.success) {
-            this.contracts = await ContractStore.getContractsFromSupabase();
-            this.renderAll();
-          }
-        }
-      } catch (e) {
-        alert('마이그레이션 중 오류 발생: ' + e.message);
-      }
-    });
-
-    if (this.btnExport) this.btnExport.addEventListener('click', () => this.exportData());
-    if (this.importFileInput) this.importFileInput.addEventListener('change', (e) => this.importData(e));
   }
 
   async loadDataAndRender() {
@@ -941,10 +775,10 @@ class AppUI {
     let filtered = this.contracts.filter(c => {
       const matchFilter = this.currentFilter === 'all' || c.contractType === this.currentFilter;
       const matchSearch = !this.searchTerm || 
-        c.client.toLowerCase().includes(this.searchTerm) || 
-        c.company.toLowerCase().includes(this.searchTerm) ||
-        c.title.toLowerCase().includes(this.searchTerm) ||
-        c.productGroup.toLowerCase().includes(this.searchTerm);
+        (c.client || '').toLowerCase().includes(this.searchTerm) || 
+        (c.company || '').toLowerCase().includes(this.searchTerm) ||
+        (c.title || '').toLowerCase().includes(this.searchTerm) ||
+        (c.productGroup || '').toLowerCase().includes(this.searchTerm);
       return matchFilter && matchSearch;
     });
 
@@ -1040,7 +874,7 @@ class AppUI {
     }
 
     this.selfAnalysisContainer.innerHTML = selfContracts.map(c => {
-      const isSenior = GfcAdvancedEngine.calculateTenureMonth(this.settings.joinDate) > 24;
+      const isSenior = GfcAdvancedEngine.calculateTenureMonth(this.settings.joinDate, new Date(c.startDate)) > 24;
       const premium = Number(c.premium) || 0;
       const surrender16 = Number(c.surrenderValue16) || 0;
 
@@ -1456,7 +1290,7 @@ class AppUI {
     const c = this.contracts.find(item => item.id === contractId);
     if (!c) return;
 
-    const isSenior = GfcAdvancedEngine.calculateTenureMonth(this.settings.joinDate) > 24;
+    const isSenior = GfcAdvancedEngine.calculateTenureMonth(this.settings.joinDate, new Date(c.startDate)) > 24;
     const premium = Number(c.premium) || 0;
     const surrender16 = Number(c.surrenderValue16) || 0;
 
@@ -1642,6 +1476,11 @@ class AppUI {
       memo: document.getElementById('form-memo').value.trim()
     };
 
+    if (!contractData.client || !contractData.title || contractData.premium < 0) {
+      alert('필수 입력값이 누락되었거나 잘못된 형식입니다. (계약자명/상품명/보험료를 확인해주세요)');
+      return;
+    }
+
     console.log('Saving contract data:', contractData);
 
     try {
@@ -1675,40 +1514,6 @@ class AppUI {
     }
   }
 
-  exportData() {
-    const jsonStr = JSON.stringify(this.contracts, null, 2);
-    const blob = new Blob([jsonStr], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `gfc_premium_manager_${new Date().toISOString().split('T')[0]}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
-  }
-
-  importData(e) {
-    const file = e.target.files[0];
-    if (!file) return;
-
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      try {
-        const imported = JSON.parse(event.target.result);
-        if (Array.isArray(imported)) {
-          ContractStore.saveContracts(imported);
-          this.contracts = imported;
-          this.renderAll();
-          alert('성공적으로 데이터를 불러왔습니다.');
-        } else {
-          alert('올바르지 않은 JSON 데이터 형식입니다.');
-        }
-      } catch (err) {
-        alert('파일을 읽는 중 오류가 발생했습니다: ' + err.message);
-      }
-    };
-    reader.readAsText(file);
-    e.target.value = '';
-  }
 }
 
 // Global App Instance
