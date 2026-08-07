@@ -311,14 +311,59 @@ class GfcAdvancedEngine {
     return Math.round(baseSettlement + perfBonus);
   }
 
-  // 회차별 수수료 환수율 (%) — "2회차 100% ~ 15회차 7% 환수표"
-  // ⚠️ 규정집 원문에는 2회차/15회차 양 끝값만 명시되어 있고 3~14회차 세부 %는 제공되지 않아
-  //    두 값을 선형보간한 추정치입니다. 실제 삼성생명 GFC 사규의 정확한 회차별 환수율을
-  //    확인해서 아래 표를 교체해 주세요.
+  // 회차별 수수료 환수율 (%) — 규정집 "3.계약관련 수수료 > 신계약수수료 ①초회분 미유지時 회차별 환수율" 원문 수치
   static COMMISSION_CLAWBACK_TABLE = {
-    2: 100, 3: 93, 4: 86, 5: 79, 6: 71, 7: 64, 8: 57, 9: 50,
-    10: 43, 11: 36, 12: 29, 13: 21, 14: 14, 15: 7
+    2: 100, 3: 100, 4: 92, 5: 84, 6: 76, 7: 68, 8: 60, 9: 52,
+    10: 44, 11: 36, 12: 28, 13: 21, 14: 14, 15: 7
   };
+
+  // 계약관리 보너스 (13~60회차, 규정집 "3.계약관련 수수료 > 계약관리 보너스" 표)
+  // 신계약수수료(1~15회)와 별개로 병행 지급되는 장기유지 수수료
+  static getManagementBonusRate(productGroup, elapsedMonths) {
+    const round = elapsedMonths + 1; // elapsedMonths(0-based) → 회차(1-based)
+    if (round < 13 || round > 60) return 0;
+
+    if (productGroup === '종신/GI 보험') {
+      if (round <= 24) return 14;
+      if (round <= 36) return 11;
+      return 0; // 37~60회 미지급
+    }
+    if (productGroup === '건강/상해보험') {
+      if (round <= 24) return 4;
+      if (round <= 36) return 3;
+      return 0; // 37~60회 미지급
+    }
+    // 연금/저축성보험 (금융형)
+    if (round <= 24) return 11;
+    if (round <= 36) return 8;
+    return 3; // 37~60회 3%
+  }
+
+  // 신계약수수료(1~15회) + 계약관리보너스(13~60회)를 합산한 회차별 총 수수료율(%)
+  static getCombinedCommissionRate(productGroup, elapsedMonths, feeRates) {
+    let rate = 0;
+    if (elapsedMonths >= 0 && elapsedMonths < 15) {
+      rate += feeRates[elapsedMonths] || 0;
+    }
+    rate += this.getManagementBonusRate(productGroup, elapsedMonths);
+    return rate;
+  }
+
+  // 1~15회차까지 발생하는 총 수수료(신계약수수료 + 13~15회 계약관리보너스 + 13회차 건강상해보너스)
+  // 자기계약 "16회차 해지 수지분석"에서 공용으로 사용
+  static calculateTotalCommissionThrough15Rounds(contract, feeRates) {
+    const premium = Number(contract.premium) || 0;
+    const tp = Number(contract.tp) || 0;
+    let total = 0;
+    for (let elapsed = 0; elapsed < 15; elapsed++) {
+      const rate = this.getCombinedCommissionRate(contract.productGroup, elapsed, feeRates);
+      total += premium * (rate / 100);
+    }
+    if (contract.productGroup === '건강/상해보험') {
+      total += tp * 1.80; // 13회차 건강상해보너스
+    }
+    return total;
+  }
 
   static getFeeSchedule(productGroup, isSenior = false) {
     if (!isSenior) {
@@ -358,9 +403,15 @@ class GfcAdvancedEngine {
       const isTerminatedBeforeThisMonth = (status === '해지' || status === '실효') && (elapsedMonths >= terminationMonth);
       const isTerminatedThisMonth = (status === '해지' || status === '실효') && (elapsedMonths === terminationMonth);
 
-      if (elapsedMonths >= 0 && elapsedMonths < 15 && !isTerminatedBeforeThisMonth) {
-        const rate = feeRates[elapsedMonths] || 0;
+      if (elapsedMonths >= 0 && !isTerminatedBeforeThisMonth) {
+        const rate = this.getCombinedCommissionRate(contract.productGroup, elapsedMonths, feeRates);
         commissionIncome = premium * (rate / 100);
+
+        // 건강상해보너스: 건강/상해보험이 13회차까지 유지되면 1회성으로 환산성적(TP)×180% 지급
+        if (contract.productGroup === '건강/상해보험' && elapsedMonths === 12) {
+          const tp = Number(contract.tp) || 0;
+          commissionIncome += tp * 1.80;
+        }
       }
 
       // 시책은 수수료(1~15회차)와 별개의 조건이므로, 납입회차가 15회차를 넘는 시책도
@@ -397,7 +448,8 @@ class GfcAdvancedEngine {
         if (clawbackRate > 0) {
           let cumulativeCommission = 0;
           for (let pastElapsed = 0; pastElapsed < terminationMonth; pastElapsed++) {
-            cumulativeCommission += premium * ((feeRates[pastElapsed] || 0) / 100);
+            const pastRate = this.getCombinedCommissionRate(contract.productGroup, pastElapsed, feeRates);
+            cumulativeCommission += premium * (pastRate / 100);
           }
           clawbackAmount += Math.round(cumulativeCommission * (clawbackRate / 100));
         }
@@ -879,7 +931,7 @@ class AppUI {
       const surrender16 = Number(c.surrenderValue16) || 0;
 
       const feeRates = GfcAdvancedEngine.getFeeSchedule(c.productGroup, isSenior);
-      const totalComm = feeRates.reduce((a, b) => a + premium * (b / 100), 0);
+      const totalComm = GfcAdvancedEngine.calculateTotalCommissionThrough15Rounds(c, feeRates);
       
       const promotions = c.promotions || [];
       const totalPromoCalc = promotions.reduce((sum, p) => {
@@ -1089,19 +1141,21 @@ class AppUI {
         }
       });
 
-      // 당월 수수료·시책이 발생하는 계약들의 TP 합계 (1~15회차 진행 중인 전체 계약, 표시용)
+      // 당월 수수료·시책이 발생하는 계약들의 TP 합계 (1~60회차 진행 중인 전체 계약, 표시용)
       let totalTP = 0;
       let contractRows = this.contracts.map(c => {
         if (c.status !== '정상유지') return '';
         const startDate = new Date(c.startDate);
         const elapsed = (targetDate.getFullYear() - startDate.getFullYear()) * 12 + (targetDate.getMonth() - startDate.getMonth());
-        if (elapsed < 0 || elapsed >= 15) return '';
+        if (elapsed < 0 || elapsed >= 60) return '';
 
         const tp = Number(c.tp) || 0;
-        totalTP += tp;
 
         const feeRates = GfcAdvancedEngine.getFeeSchedule(c.productGroup, isSen);
-        const rate = feeRates[elapsed] || 0;
+        const rate = GfcAdvancedEngine.getCombinedCommissionRate(c.productGroup, elapsed, feeRates);
+        if (rate <= 0 && !(c.productGroup === '건강/상해보험' && elapsed === 12)) return '';
+
+        totalTP += tp;
 
         // 실제 KPI/차트 집계와 완전히 동일한 엔진 함수를 그대로 재사용 (수수료/시책 시점 계산 이중 구현 방지)
         const contractSchedule = GfcAdvancedEngine.calculateMonthlySchedule(c, mIdx + 1, this.settings.joinDate, baseDate);
@@ -1295,7 +1349,7 @@ class AppUI {
     const surrender16 = Number(c.surrenderValue16) || 0;
 
     const feeRates = GfcAdvancedEngine.getFeeSchedule(c.productGroup, isSenior);
-    const totalComm = feeRates.reduce((a, b) => a + premium * (b / 100), 0);
+    const totalComm = GfcAdvancedEngine.calculateTotalCommissionThrough15Rounds(c, feeRates);
     
     const promotions = c.promotions || [];
     const totalPromoCalc = promotions.reduce((sum, p) => {
@@ -1310,8 +1364,18 @@ class AppUI {
     const netProfitAt16 = totalIncomeNet + surrender16 - totalExpense15;
 
     let monthlyCommRows = feeRates.map((rate, idx) => {
-      let comm = premium * (rate / 100);
-      return `<div class="flex justify-between py-1 border-b border-slate-100"><span>${idx + 1}회차 (환산율 ${rate}%):</span> <strong class="text-emerald-600">+${Math.round(comm).toLocaleString()}원</strong></div>`;
+      const combinedRate = GfcAdvancedEngine.getCombinedCommissionRate(c.productGroup, idx, feeRates);
+      const mgmtRate = combinedRate - rate;
+      let comm = premium * (combinedRate / 100);
+      let extra = '';
+      if (mgmtRate > 0) extra += ` (신계약 ${rate}% + 계약관리보너스 ${mgmtRate}%)`;
+      if (c.productGroup === '건강/상해보험' && idx === 12) {
+        const tp = Number(c.tp) || 0;
+        const healthBonus = tp * 1.80;
+        comm += healthBonus;
+        extra += ` + 건강상해보너스(TP×180%) ${Math.round(healthBonus).toLocaleString()}원`;
+      }
+      return `<div class="flex justify-between py-1 border-b border-slate-100"><span>${idx + 1}회차 (환산율 ${combinedRate}%)${extra}:</span> <strong class="text-emerald-600">+${Math.round(comm).toLocaleString()}원</strong></div>`;
     }).join('');
 
     let promoRows = promotions.map((p, idx) => {
