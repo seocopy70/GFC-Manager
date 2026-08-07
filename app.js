@@ -6,63 +6,33 @@
  * Updated with Independent Monthly TP Calculation, Detailed Multi-month Cashflow & Self Analysis.
  */
 
-// --- Data Model & Storage ---
+// --- Data Model & Storage (Supabase 전용) ---
 class ContractStore {
-  static STORAGE_KEY = 'gfc_premium_manager_v5';
-
-  static getContracts() {
-    try {
-      const data = localStorage.getItem(this.STORAGE_KEY);
-      return data ? JSON.parse(data) : [];
-    } catch (e) {
-      console.error('Failed to load contracts:', e);
-      return [];
-    }
-  }
-
-  static saveContracts(contracts) {
-    try {
-      localStorage.setItem(this.STORAGE_KEY, JSON.stringify(contracts));
-    } catch (e) {
-      console.error('Failed to save contracts:', e);
-    }
-  }
-
   static async getSettings() {
     const user = await this.checkAuth();
-    if (user) {
-      const { data, error } = await window.supabase
-        .from('profiles')
-        .select('settings')
-        .eq('id', user.id)
-        .single();
-      if (error) console.error('Supabase 설정 로드 에러:', error);
-      // 로그인 상태에서는 Supabase가 유일한 기준 — 계정 간 localStorage 공유로 인한
-      // 설정(위촉연월/클럽등급) 혼선을 막기 위해 로컬 폴백을 쓰지 않음
-      return (data && data.settings) ? data.settings : { joinDate: '2025-01', clubTier: 'club_350' };
-    }
-    try {
-      const data = localStorage.getItem(this.STORAGE_KEY + '_settings');
-      return data ? JSON.parse(data) : { joinDate: '2025-01', clubTier: 'club_350' };
-    } catch (e) {
-      return { joinDate: '2025-01', clubTier: 'club_350' };
-    }
+    if (!user) return { joinDate: '2025-01', clubTier: 'club_350' };
+
+    const { data, error } = await window.supabase
+      .from('profiles')
+      .select('settings')
+      .eq('id', user.id)
+      .single();
+    if (error) console.error('Supabase 설정 로드 에러:', error);
+    return (data && data.settings) ? data.settings : { joinDate: '2025-01', clubTier: 'club_350' };
   }
 
   static async saveSettings(settings) {
     const user = await this.checkAuth();
-    if (user) {
-      const { error } = await window.supabase
-        .from('profiles')
-        .upsert({ id: user.id, settings: settings });
-      
-      if (error) {
-        console.error('Supabase settings save error:', error);
-        throw new Error('Supabase 설정 저장 실패: ' + error.message);
-      }
-      return; // 로그인 상태에서는 localStorage에 쓰지 않음 (계정 간 데이터 혼선 방지)
+    if (!user) throw new Error('로그인이 필요합니다.');
+
+    const { error } = await window.supabase
+      .from('profiles')
+      .upsert({ id: user.id, settings: settings });
+
+    if (error) {
+      console.error('Supabase settings save error:', error);
+      throw new Error('Supabase 설정 저장 실패: ' + error.message);
     }
-    localStorage.setItem(this.STORAGE_KEY + '_settings', JSON.stringify(settings));
   }
 
   // 인증 상태 관리
@@ -155,73 +125,6 @@ class ContractStore {
     return data;
   }
 
-  // 로컬 데이터를 Supabase 로 마이그레이션
-  static async migrateLocalDataToSupabase() {
-    const user = await this.checkAuth();
-    if (!user) return { success: false, message: '로그인이 필요합니다.' };
-
-    const localContracts = this.getContracts();
-    if (localContracts.length === 0) {
-      return { success: true, message: '마이그레이션할 로컬 데이터가 없습니다.' };
-    }
-
-    try {
-      const { data: existingData } = await window.supabase
-        .from('contracts')
-        .select('id')
-        .eq('user_id', user.id);
-
-      const existingIds = new Set((existingData || []).map(d => d.id));
-
-      const contractsToInsert = localContracts.filter(c => !existingIds.has(c.id));
-
-      if (contractsToInsert.length === 0) {
-        return { success: true, message: '모든 데이터가 이미 Supabase 에 있습니다.' };
-      }
-
-      const { error: insertError } = await window.supabase
-        .from('contracts')
-        .insert(contractsToInsert.map(c => ({ ...c, user_id: user.id })));
-
-      if (insertError) {
-        console.error('Supabase insert error:', insertError);
-        return { success: false, message: 'Supabase 저장 실패: ' + insertError.message };
-      }
-
-      this.saveContracts([]);
-
-      return { success: true, message: `${contractsToInsert.length}개의 데이터를 Supabase 로 마이그레이션했습니다.` };
-    } catch (e) {
-      console.error('Migration error:', e);
-      return { success: false, message: '마이그레이션 중 오류 발생: ' + e.message };
-    }
-  }
-
-  static addContract(contract) {
-    // 유효성 검증
-    if (!contract.client || !contract.title || Number(contract.premium) < 0) {
-      throw new Error('필수 입력값이 누락되었거나 잘못된 형식입니다.');
-    }
-    const contracts = this.getContracts();
-    contract.id = 'GFC*' + Date.now() + '-' + Math.floor(Math.random() * 1000);
-    contract.createdAt = new Date().toISOString();
-    contracts.unshift(contract);
-    this.saveContracts(contracts);
-    return contract;
-  }
-
-  static updateContract(updatedContract) {
-    let contracts = this.getContracts();
-    contracts = contracts.map(c => c.id === updatedContract.id ? { ...c, ...updatedContract } : c);
-    this.saveContracts(contracts);
-  }
-
-  static deleteContract(id) {
-    let contracts = this.getContracts();
-    contracts = contracts.filter(c => c.id !== id);
-    this.saveContracts(contracts);
-  }
-
   // Supabase 연동 메서드들
   static async addContractToSupabase(contract) {
     const user = await this.checkAuth();
@@ -306,61 +209,6 @@ class ContractStore {
     if (error) throw error;
   }
 
-  static generateSampleData() {
-    const today = new Date();
-    const formatDate = (monthsAgo) => {
-      const d = new Date(today);
-      d.setMonth(d.getMonth() - monthsAgo);
-      return d.toISOString().split('T')[0];
-    };
-
-    const samples = [
-      {
-        id: 'SMP-1',
-        contractType: '진성계약',
-        status: '정상유지',
-        terminationMonth: 6,
-        productGroup: '건강/상해보험',
-        client: '김철수',
-        company: '삼성생명',
-        title: '무배당 통합건강보험',
-        startDate: formatDate(1),
-        premium: 200000,
-        paymentYears: 20,
-        tp: 240000,
-        surrenderValue16: 1200000,
-        promotions: [
-          { type: 'percent', value: 300, afterPaymentMonth: 1 }
-        ],
-        memo: '건강보험 300% 시책 (1 회차 납입 후 익월 지급)',
-        createdAt: new Date().toISOString()
-      },
-      {
-        id: 'SMP-2',
-        contractType: '자기계약',
-        status: '정상유지',
-        terminationMonth: 6,
-        productGroup: '종신/GI 보험',
-        client: '본인 (GFC)',
-        company: '삼성생명',
-        title: '무배당 경영인 종신보험 (자기)',
-        startDate: formatDate(2),
-        premium: 300000,
-        paymentYears: 10,
-        tp: 360000,
-        surrenderValue16: 2500000,
-        promotions: [
-          { type: 'amount', value: 200000, afterPaymentMonth: 1 },
-          { type: 'percent', value: 100, afterPaymentMonth: 13 }
-        ],
-        memo: '종신 자기계약 및 16 회차 해지 환급금 수지분석',
-        createdAt: new Date().toISOString()
-      }
-    ];
-
-    this.saveContracts(samples);
-    return samples;
-  }
 }
 
 // --- GFC Advanced Financial Engine (Manual Club Tier Integration with 30 만 Club) ---
@@ -463,6 +311,147 @@ class GfcAdvancedEngine {
     return Math.round(baseSettlement + perfBonus);
   }
 
+  // 계약이 특정 시점(targetDate)에 정상적으로 유지되고 있는지 판단 (해지/실효라면 해지월 이전까지만 유지로 봄)
+  static isContractMaintainedAt(contract, targetDate) {
+    const startDate = new Date(contract.startDate);
+    const elapsedMonths = (targetDate.getFullYear() - startDate.getFullYear()) * 12 + (targetDate.getMonth() - startDate.getMonth());
+    if (elapsedMonths < 0) return false;
+    const status = contract.status || '정상유지';
+    if (status !== '해지' && status !== '실효') return true;
+    const terminationMonth = Number(contract.terminationMonth) || 6;
+    return elapsedMonths < terminationMonth;
+  }
+
+  // 신인 유지보너스 (규정집 "4.신인수수료 > 신인 유지보너스"): 신인 1~11차월에 모집한 계약 중
+  // 대상월 현재까지 유지 중인 계약들의 TP 합계 × 위촉 13~18차월별 지급률, 월 지급 한도 300만원
+  static getRetentionBonusRate(tenureMonth) {
+    if (tenureMonth === 13) return 20;
+    if (tenureMonth === 14) return 30;
+    if (tenureMonth >= 15 && tenureMonth <= 18) return 40;
+    return 0;
+  }
+
+  static calculateRetentionBonus(contracts, joinDateStr, targetDate) {
+    const tenureMonth = this.calculateTenureMonth(joinDateStr, targetDate);
+    const rate = this.getRetentionBonusRate(tenureMonth);
+    if (rate <= 0) return 0;
+
+    let maintainedTP = 0;
+    contracts.forEach(c => {
+      const startDate = new Date(c.startDate);
+      const regTenure = this.calculateTenureMonth(joinDateStr, startDate);
+      if (regTenure < 1 || regTenure > 11) return; // 신인 1~11차월에 모집한 계약만 대상
+      if (this.isContractMaintainedAt(c, targetDate)) {
+        maintainedTP += (Number(c.tp) || 0);
+      }
+    });
+
+    const bonus = maintainedTP * (rate / 100);
+    return Math.min(Math.round(bonus), 3000000); // 월 지급 한도 300만원
+  }
+
+  // 신인성과보너스 회차별 환수율 (%) — 규정집 "3.신인성과보너스 > 환수기준" 표
+  static NEW_PLANNER_BONUS_CLAWBACK_TABLE = {
+    2: 100, 3: 95, 4: 89, 5: 84, 6: 78, 7: 73, 8: 68, 9: 62,
+    10: 57, 11: 52, 12: 46, 13: 41, 14: 35, 15: 30
+  };
+
+  // 신인성과보너스 개별계약 환수 (구조변경): 신인성과보너스는 "그 달 신규계약 TP 합계"를 기준으로
+  // 월 단위로 지급되기 때문에, 특정 계약 하나가 나중에 해지되면 그 계약이 원래 지급월의 보너스에서
+  // 차지했던 TP 비중(pro-rata)만큼을 그 계약의 "귀속 보너스"로 보고, 해당 계약의 미유지 회차별
+  // 환수율을 적용해 환수액을 계산한다. (regulation에 개별계약 배분 방식이 명시되어 있지 않아
+  // TP 비례 배분으로 추정 구현 — 실제 사규와 다를 수 있으니 결과를 검증해 주세요)
+  static calculateNewPlannerBonusClawback(contracts, joinDateStr, targetDate) {
+    let totalClawback = 0;
+
+    contracts.forEach(contract => {
+      const status = contract.status || '정상유지';
+      if (status !== '해지' && status !== '실효') return;
+
+      const terminationMonth = Number(contract.terminationMonth) || 6;
+      const startDate = new Date(contract.startDate);
+      const elapsedAtTarget = (targetDate.getFullYear() - startDate.getFullYear()) * 12 + (targetDate.getMonth() - startDate.getMonth());
+      if (elapsedAtTarget !== terminationMonth) return; // 이번 달에 해지/실효가 발생한 계약만 처리
+
+      const terminationRound = terminationMonth + 1; // elapsedMonths(0-based) → 회차(1-based)
+      const clawbackRate = this.NEW_PLANNER_BONUS_CLAWBACK_TABLE[terminationRound] || 0;
+      if (clawbackRate <= 0) return;
+
+      const regTenure = this.calculateTenureMonth(joinDateStr, startDate);
+      if (regTenure > 24) return; // 시니어 시절 등록된 계약은 신인성과보너스 대상이 아님
+
+      // 이 계약이 등록됐던 달의 신규계약 TP 합계를 재계산
+      let regMonthTotalTP = 0;
+      contracts.forEach(other => {
+        const otherStart = new Date(other.startDate);
+        if (otherStart.getFullYear() === startDate.getFullYear() && otherStart.getMonth() === startDate.getMonth()) {
+          regMonthTotalTP += (Number(other.tp) || 0);
+        }
+      });
+      if (regMonthTotalTP <= 0) return;
+
+      const originalBonus = this.getNewPlannerSupport(regTenure, regMonthTotalTP);
+      const contractShare = originalBonus * ((Number(contract.tp) || 0) / regMonthTotalTP);
+      totalClawback += Math.round(contractShare * (clawbackRate / 100));
+    });
+
+    return totalClawback;
+  }
+
+  // 회차별 수수료 환수율 (%) — 규정집 "3.계약관련 수수료 > 신계약수수료 ①초회분 미유지時 회차별 환수율" 원문 수치
+  static COMMISSION_CLAWBACK_TABLE = {
+    2: 100, 3: 100, 4: 92, 5: 84, 6: 76, 7: 68, 8: 60, 9: 52,
+    10: 44, 11: 36, 12: 28, 13: 21, 14: 14, 15: 7
+  };
+
+  // 계약관리 보너스 (13~60회차, 규정집 "3.계약관련 수수료 > 계약관리 보너스" 표)
+  // 신계약수수료(1~15회)와 별개로 병행 지급되는 장기유지 수수료
+  static getManagementBonusRate(productGroup, elapsedMonths) {
+    const round = elapsedMonths + 1; // elapsedMonths(0-based) → 회차(1-based)
+    if (round < 13 || round > 60) return 0;
+
+    if (productGroup === '종신/GI 보험') {
+      if (round <= 24) return 14;
+      if (round <= 36) return 11;
+      return 0; // 37~60회 미지급
+    }
+    if (productGroup === '건강/상해보험') {
+      if (round <= 24) return 4;
+      if (round <= 36) return 3;
+      return 0; // 37~60회 미지급
+    }
+    // 연금/저축성보험 (금융형)
+    if (round <= 24) return 11;
+    if (round <= 36) return 8;
+    return 3; // 37~60회 3%
+  }
+
+  // 신계약수수료(1~15회) + 계약관리보너스(13~60회)를 합산한 회차별 총 수수료율(%)
+  static getCombinedCommissionRate(productGroup, elapsedMonths, feeRates) {
+    let rate = 0;
+    if (elapsedMonths >= 0 && elapsedMonths < 15) {
+      rate += feeRates[elapsedMonths] || 0;
+    }
+    rate += this.getManagementBonusRate(productGroup, elapsedMonths);
+    return rate;
+  }
+
+  // 1~15회차까지 발생하는 총 수수료(신계약수수료 + 13~15회 계약관리보너스 + 13회차 건강상해보너스)
+  // 자기계약 "16회차 해지 수지분석"에서 공용으로 사용
+  static calculateTotalCommissionThrough15Rounds(contract, feeRates) {
+    const premium = Number(contract.premium) || 0;
+    const tp = Number(contract.tp) || 0;
+    let total = 0;
+    for (let elapsed = 0; elapsed < 15; elapsed++) {
+      const rate = this.getCombinedCommissionRate(contract.productGroup, elapsed, feeRates);
+      total += premium * (rate / 100);
+    }
+    if (contract.productGroup === '건강/상해보험') {
+      total += tp * 1.80; // 13회차 건강상해보너스
+    }
+    return total;
+  }
+
   static getFeeSchedule(productGroup, isSenior = false) {
     if (!isSenior) {
       if (productGroup === '종신/GI 보험') return [112, 8,8,8,8,8,8,8,8,8,8,8, 20,20, 12];
@@ -477,11 +466,13 @@ class GfcAdvancedEngine {
   static calculateMonthlySchedule(contract, horizonMonths = 24, joinDateStr = '2025-01', baseDate = null) {
     const schedule = [];
     const startDate = new Date(contract.startDate);
-    const actualToday = new Date();
-    const rangeStart = baseDate instanceof Date ? baseDate : actualToday;
+    const rangeStart = baseDate instanceof Date ? baseDate : new Date();
 
     const premium = Number(contract.premium) || 0;
-    const isSenior = this.calculateTenureMonth(joinDateStr, actualToday) > 24;
+    // 신인/시니어 수수료 구조는 "계약 체결 시점"의 위촉차월 기준으로 고정된다.
+    // (오늘 날짜나 예측 대상월 기준으로 계산하면, 실제로는 신인 구조로 체결된 과거 계약이
+    //  플래너가 25차월을 넘긴 뒤에는 시니어 구조로 잘못 표시되는 오류가 생김)
+    const isSenior = this.calculateTenureMonth(joinDateStr, startDate) > 24;
     const feeRates = this.getFeeSchedule(contract.productGroup, isSenior);
     const promotions = contract.promotions || [];
     const status = contract.status || '정상유지';
@@ -499,15 +490,24 @@ class GfcAdvancedEngine {
       const isTerminatedBeforeThisMonth = (status === '해지' || status === '실효') && (elapsedMonths >= terminationMonth);
       const isTerminatedThisMonth = (status === '해지' || status === '실효') && (elapsedMonths === terminationMonth);
 
-      if (elapsedMonths >= 0 && elapsedMonths < 15 && !isTerminatedBeforeThisMonth) {
-        const rate = feeRates[elapsedMonths] || 0;
+      if (elapsedMonths >= 0 && !isTerminatedBeforeThisMonth) {
+        const rate = this.getCombinedCommissionRate(contract.productGroup, elapsedMonths, feeRates);
         commissionIncome = premium * (rate / 100);
 
+        // 건강상해보너스: 건강/상해보험이 13회차까지 유지되면 1회성으로 환산성적(TP)×180% 지급
+        if (contract.productGroup === '건강/상해보험' && elapsedMonths === 12) {
+          const tp = Number(contract.tp) || 0;
+          commissionIncome += tp * 1.80;
+        }
+      }
+
+      // 시책은 수수료(1~15회차)와 별개의 조건이므로, 납입회차가 15회차를 넘는 시책도
+      // (해지 전이라면) 정상적으로 지급되어야 함 — 이전 코드는 위 15개월 블록 안에 있어서
+      // 16회차 이후로 설정된 시책은 절대 지급되지 않는 버그가 있었음
+      if (!isTerminatedBeforeThisMonth) {
         promotions.forEach(promo => {
           const targetDepositMonth = Number(promo.afterPaymentMonth) || 1;
-          const payoutElapsedMonth = targetDepositMonth;
-          
-          if (elapsedMonths === payoutElapsedMonth) {
+          if (elapsedMonths === targetDepositMonth) {
             let pVal = Number(promo.value) || 0;
             let earnedPromo = promo.type === 'percent' ? premium * (pVal / 100) : pVal;
             promoIncome += earnedPromo;
@@ -515,16 +515,31 @@ class GfcAdvancedEngine {
         });
       }
 
-      if (isTerminatedThisMonth && terminationMonth < 25) {
-        let totalPromoReceived = 0;
-        promotions.forEach(promo => {
-          const targetDepositMonth = Number(promo.afterPaymentMonth) || 1;
-          if (targetDepositMonth <= terminationMonth) {
-            let pVal = Number(promo.value) || 0;
-            totalPromoReceived += (promo.type === 'percent' ? premium * (pVal / 100) : pVal);
+      if (isTerminatedThisMonth) {
+        // (1) 시책 환수: 25차월 이내 해지 시 기지급 시책의 70% 환수
+        if (terminationMonth < 25) {
+          let totalPromoReceived = 0;
+          promotions.forEach(promo => {
+            const targetDepositMonth = Number(promo.afterPaymentMonth) || 1;
+            if (targetDepositMonth <= terminationMonth) {
+              let pVal = Number(promo.value) || 0;
+              totalPromoReceived += (promo.type === 'percent' ? premium * (pVal / 100) : pVal);
+            }
+          });
+          clawbackAmount += Math.round(totalPromoReceived * 0.70);
+        }
+
+        // (2) 수수료 환수: 2~15회차 해지/실효 시 그동안 지급된 누적 수수료를 회차별 환수율로 환수
+        const terminationRound = terminationMonth + 1; // elapsedMonths(0-based) → 회차(1-based)
+        const clawbackRate = this.COMMISSION_CLAWBACK_TABLE[terminationRound] || 0;
+        if (clawbackRate > 0) {
+          let cumulativeCommission = 0;
+          for (let pastElapsed = 0; pastElapsed < terminationMonth; pastElapsed++) {
+            const pastRate = this.getCombinedCommissionRate(contract.productGroup, pastElapsed, feeRates);
+            cumulativeCommission += premium * (pastRate / 100);
           }
-        });
-        clawbackAmount = Math.round(totalPromoReceived * 0.70);
+          clawbackAmount += Math.round(cumulativeCommission * (clawbackRate / 100));
+        }
       }
 
       if (contract.contractType === '자기계약' && !isTerminatedBeforeThisMonth) {
@@ -585,6 +600,14 @@ class GfcAdvancedEngine {
           plannerBonus = this.getNewPlannerSupport(tenureMonth, monthlyTP);
         } else {
           plannerBonus = this.calculateSeniorPerformanceBonus(monthlyTP, clubKey);
+        }
+        // 신인 유지보너스 (13~18차월, 신인 1~11차월 모집계약 유지TP 기준)
+        plannerBonus += this.calculateRetentionBonus(contracts, joinDateStr, targetDate);
+        // 신인성과보너스 개별계약 환수 (해당월 해지/실효 계약분)
+        plannerBonus -= this.calculateNewPlannerBonusClawback(contracts, joinDateStr, targetDate);
+        // GFC 교육비: 등록월(위촉 1차월) 1회성 80만원 (등록 익일 지급, 0차월 교육수료 기준)
+        if (tenureMonth === 1) {
+          plannerBonus += 800000;
         }
       }
 
@@ -681,11 +704,6 @@ class AppUI {
     this.btnCloseDetailModal = document.getElementById('btn-close-detail-modal');
     this.detailModalTitle = document.getElementById('detail-modal-title');
     this.detailModalBody = document.getElementById('detail-modal-body');
-
-    this.btnSampleData = document.getElementById('btn-sample-data');
-    this.btnExport = document.getElementById('btn-export');
-    this.btnMigrate = document.getElementById('btn-migrate');
-    this.importFileInput = document.getElementById('import-file');
   }
 
   bindEvents() {
@@ -707,8 +725,8 @@ class AppUI {
     this.btnCancelModal.addEventListener('click', () => this.closeModal());
     this.btnAddPromo.addEventListener('click', () => this.addPromoRow());
 
-    if (this.btnOpenRulesModal) this.btnOpenRulesModal.addEventListener('click', () => this.rulesModal.classList.remove('hidden'));
-    if (this.btnCloseRulesModal) this.btnCloseRulesModal.addEventListener('click', () => this.rulesModal.classList.add('hidden'));
+    this.btnOpenRulesModal.addEventListener('click', () => this.rulesModal.classList.remove('hidden'));
+    this.btnCloseRulesModal.addEventListener('click', () => this.rulesModal.classList.add('hidden'));
 
     this.btnCloseDetailModal.addEventListener('click', () => this.detailModal.classList.add('hidden'));
 
@@ -783,43 +801,6 @@ class AppUI {
     });
 
     this.chartRangeSelect.addEventListener('change', () => this.renderChart());
-
-    if (this.btnSampleData) this.btnSampleData.addEventListener('click', () => {
-      if (confirm('클럽 등급 직접선택 샘플 데이터로 로드하시겠습니까?')) {
-        this.contracts = ContractStore.generateSampleData();
-        this.renderAll();
-      }
-    });
-
-    if (this.btnMigrate) this.btnMigrate.addEventListener('click', async () => {
-      const localContracts = ContractStore.getContracts();
-      if (localContracts.length === 0) {
-        alert('마이그레이션할 로컬 데이터가 없습니다.');
-        return;
-      }
-
-      try {
-        const user = await ContractStore.checkAuth();
-        if (!user) {
-          alert('로그인이 필요합니다. 먼저 로그인해주세요.');
-          return;
-        }
-
-        if (confirm(`${localContracts.length}개의 로컬 데이터를 Supabase 로 마이그레이션하시겠습니까?\n\n마이그레이션 후 로컬 데이터는 삭제됩니다.`)) {
-          const result = await ContractStore.migrateLocalDataToSupabase();
-          alert(result.message);
-          if (result.success) {
-            this.contracts = await ContractStore.getContractsFromSupabase();
-            this.renderAll();
-          }
-        }
-      } catch (e) {
-        alert('마이그레이션 중 오류 발생: ' + e.message);
-      }
-    });
-
-    if (this.btnExport) this.btnExport.addEventListener('click', () => this.exportData());
-    if (this.importFileInput) this.importFileInput.addEventListener('change', (e) => this.importData(e));
   }
 
   async loadDataAndRender() {
@@ -941,10 +922,10 @@ class AppUI {
     let filtered = this.contracts.filter(c => {
       const matchFilter = this.currentFilter === 'all' || c.contractType === this.currentFilter;
       const matchSearch = !this.searchTerm || 
-        c.client.toLowerCase().includes(this.searchTerm) || 
-        c.company.toLowerCase().includes(this.searchTerm) ||
-        c.title.toLowerCase().includes(this.searchTerm) ||
-        c.productGroup.toLowerCase().includes(this.searchTerm);
+        (c.client || '').toLowerCase().includes(this.searchTerm) || 
+        (c.company || '').toLowerCase().includes(this.searchTerm) ||
+        (c.title || '').toLowerCase().includes(this.searchTerm) ||
+        (c.productGroup || '').toLowerCase().includes(this.searchTerm);
       return matchFilter && matchSearch;
     });
 
@@ -1040,12 +1021,12 @@ class AppUI {
     }
 
     this.selfAnalysisContainer.innerHTML = selfContracts.map(c => {
-      const isSenior = GfcAdvancedEngine.calculateTenureMonth(this.settings.joinDate) > 24;
+      const isSenior = GfcAdvancedEngine.calculateTenureMonth(this.settings.joinDate, new Date(c.startDate)) > 24;
       const premium = Number(c.premium) || 0;
       const surrender16 = Number(c.surrenderValue16) || 0;
 
       const feeRates = GfcAdvancedEngine.getFeeSchedule(c.productGroup, isSenior);
-      const totalComm = feeRates.reduce((a, b) => a + premium * (b / 100), 0);
+      const totalComm = GfcAdvancedEngine.calculateTotalCommissionThrough15Rounds(c, feeRates);
       
       const promotions = c.promotions || [];
       const totalPromoCalc = promotions.reduce((sum, p) => {
@@ -1255,19 +1236,21 @@ class AppUI {
         }
       });
 
-      // 당월 수수료·시책이 발생하는 계약들의 TP 합계 (1~15회차 진행 중인 전체 계약, 표시용)
+      // 당월 수수료·시책이 발생하는 계약들의 TP 합계 (1~60회차 진행 중인 전체 계약, 표시용)
       let totalTP = 0;
       let contractRows = this.contracts.map(c => {
         if (c.status !== '정상유지') return '';
         const startDate = new Date(c.startDate);
         const elapsed = (targetDate.getFullYear() - startDate.getFullYear()) * 12 + (targetDate.getMonth() - startDate.getMonth());
-        if (elapsed < 0 || elapsed >= 15) return '';
+        if (elapsed < 0 || elapsed >= 60) return '';
 
         const tp = Number(c.tp) || 0;
-        totalTP += tp;
 
         const feeRates = GfcAdvancedEngine.getFeeSchedule(c.productGroup, isSen);
-        const rate = feeRates[elapsed] || 0;
+        const rate = GfcAdvancedEngine.getCombinedCommissionRate(c.productGroup, elapsed, feeRates);
+        if (rate <= 0 && !(c.productGroup === '건강/상해보험' && elapsed === 12)) return '';
+
+        totalTP += tp;
 
         // 실제 KPI/차트 집계와 완전히 동일한 엔진 함수를 그대로 재사용 (수수료/시책 시점 계산 이중 구현 방지)
         const contractSchedule = GfcAdvancedEngine.calculateMonthlySchedule(c, mIdx + 1, this.settings.joinDate, baseDate);
@@ -1290,57 +1273,47 @@ class AppUI {
       }).filter(Boolean).join('');
 
       let bonusBreakdown = '';
-      if (!isSen) {
-        // 정착수수료(4.2)는 1~11차월에만 지급됨
-        let baseSettlement = 0;
-        if (tMonth <= 11) {
-          if (newContractTP >= 700000) baseSettlement = 2300000;
-          else if (newContractTP >= 500000) baseSettlement = 2100000;
-          else if (newContractTP >= 300000) baseSettlement = 1500000;
-          else if (newContractTP > 0) baseSettlement = 500000;
-        }
+      const retentionBonus = GfcAdvancedEngine.calculateRetentionBonus(this.contracts, this.settings.joinDate, targetDate);
+      const bonusClawback = GfcAdvancedEngine.calculateNewPlannerBonusClawback(this.contracts, this.settings.joinDate, targetDate);
+      const eduBonus = (tMonth === 1) ? 800000 : 0;
+      const extraRows = `
+            ${retentionBonus > 0 ? `<div class="flex justify-between"><span>신인 유지보너스 (13~18차월 유지TP 기준):</span> <strong>+${retentionBonus.toLocaleString()}원</strong></div>` : ''}
+            ${eduBonus > 0 ? `<div class="flex justify-between"><span>GFC 교육비 (등록월 1회성):</span> <strong>+${eduBonus.toLocaleString()}원</strong></div>` : ''}
+            ${bonusClawback > 0 ? `<div class="flex justify-between text-rose-600"><span>신인성과보너스 환수 (당월 해지/실효 계약분):</span> <strong>-${bonusClawback.toLocaleString()}원</strong></div>` : ''}`;
 
-        let perfBonus = 0;
-        if (tMonth <= 11) {
-          if (newContractTP >= 1000000) perfBonus = 1900000 + (newContractTP - 1000000) * 1.5;
-          else if (newContractTP >= 700000) perfBonus = 1400000;
-          else if (newContractTP >= 500000) perfBonus = 1000000;
-          else if (newContractTP >= 400000) perfBonus = 500000;
-          else if (newContractTP >= 300000) perfBonus = 400000;
-        } else {
-          if (newContractTP >= 1000000) perfBonus = 2100000 + (newContractTP - 1000000) * 1.5;
-          else if (newContractTP >= 700000) perfBonus = 1600000;
-          else if (newContractTP >= 500000) perfBonus = 1350000;
-          else if (newContractTP >= 400000) perfBonus = 1000000;
-          else if (newContractTP >= 300000) perfBonus = 900000;
-        }
+      if (!isSen) {
+        // 실제 KPI 집계와 완전히 동일한 엔진 함수를 그대로 재사용 (지원금 계산 이중 구현 방지)
+        const baseSettlement = tMonth <= 11
+          ? (newContractTP >= 700000 ? 2300000 : newContractTP >= 500000 ? 2100000 : newContractTP >= 300000 ? 1500000 : (newContractTP > 0 ? 500000 : 0))
+          : 0;
+        const totalSupport = GfcAdvancedEngine.getNewPlannerSupport(tMonth, newContractTP);
+        const perfBonus = totalSupport - baseSettlement;
+        const bonusTotal = baseSettlement + perfBonus + retentionBonus + eduBonus - bonusClawback;
 
         bonusBreakdown = `
           <div class="p-3.5 bg-emerald-50 rounded-xl border border-emerald-200 text-xs text-emerald-900 space-y-1.5">
             <p class="font-bold text-sm">✨ 신인 GFC 지원금 세부 구성 (${tMonth}차월 | 당월 신규 TP: ${newContractTP.toLocaleString()}원)</p>
             <div class="flex justify-between"><span>기본 정착수수료 ${tMonth > 11 ? '(1~11차월만 지급)' : ''}:</span> <strong>+${baseSettlement.toLocaleString()}원</strong></div>
-            <div class="flex justify-between"><span>성과보너스 (업적 연동):</span> <strong>+${Math.round(perfBonus).toLocaleString()}원</strong></div>
-            <div class="border-t border-emerald-200 pt-1.5 flex justify-between font-bold text-emerald-800 text-sm"><span>지원금 합계:</span> <strong>+${item.realIncome.toLocaleString()}원</strong></div>
+            <div class="flex justify-between"><span>성과보너스 (업적 연동):</span> <strong>+${Math.round(perfBonus).toLocaleString()}원</strong></div>${extraRows}
+            <div class="border-t border-emerald-200 pt-1.5 flex justify-between font-bold text-emerald-800 text-sm"><span>지원금 합계:</span> <strong>+${Math.round(bonusTotal).toLocaleString()}원</strong></div>
           </div>
         `;
       } else {
-        let achBonus = newContractTP >= 300000 ? newContractTP * 2.0 : newContractTP * 0.7;
-        let clubParams = GfcAdvancedEngine.getClubBonusParams(clubKey);
-        let clubBonus = Math.min(5000000, newContractTP * clubParams.rate);
-        let myungInBonus = 0;
-        if (newContractTP > 5000000) {
-          let excess = newContractTP - 5000000;
-          let mRate = clubKey === 'club_350' ? 1.0 : (clubKey === 'club_230' ? 0.95 : 0);
-          myungInBonus = Math.min(5000000, excess * mRate);
-        }
+        // 실제 KPI 집계와 완전히 동일한 엔진 함수를 그대로 재사용 (지원금 계산 이중 구현 방지)
+        const achBonus = newContractTP >= 300000 ? newContractTP * 2.0 : newContractTP * 0.7;
+        const clubParams = GfcAdvancedEngine.getClubBonusParams(clubKey);
+        const totalSeniorBonus = GfcAdvancedEngine.calculateSeniorPerformanceBonus(newContractTP, clubKey);
+        const clubBonus = Math.min(5000000, newContractTP * clubParams.rate);
+        const myungInBonus = totalSeniorBonus - Math.round(achBonus) - Math.round(clubBonus);
+        const bonusTotal = Math.round(achBonus) + Math.round(clubBonus) + Math.max(0, myungInBonus) + retentionBonus + eduBonus - bonusClawback;
 
         bonusBreakdown = `
           <div class="p-3.5 bg-emerald-50 rounded-xl border border-emerald-200 text-xs text-emerald-900 space-y-1.5">
             <p class="font-bold text-sm">✨ 시니어 성과보너스 세부 구성 (${clubParams.name} | 당월 신규 TP: ${newContractTP.toLocaleString()}원)</p>
             <div class="flex justify-between"><span>업적분 (${newContractTP >= 300000 ? '200%' : '70%'}):</span> <strong>+${Math.round(achBonus).toLocaleString()}원</strong></div>
             <div class="flex justify-between"><span>클럽분 (${clubParams.name} ${clubParams.rate * 100}%):</span> <strong>+${Math.round(clubBonus).toLocaleString()}원</strong></div>
-            ${myungInBonus > 0 ? `<div class="flex justify-between"><span>초과 명인보너스:</span> <strong>+${Math.round(myungInBonus).toLocaleString()}원</strong></div>` : ''}
-            <div class="border-t border-emerald-200 pt-1.5 flex justify-between font-bold text-emerald-800 text-sm"><span>보너스 합계:</span> <strong>+${item.realIncome.toLocaleString()}원</strong></div>
+            ${myungInBonus > 0 ? `<div class="flex justify-between"><span>초과 명인보너스:</span> <strong>+${Math.round(myungInBonus).toLocaleString()}원</strong></div>` : ''}${extraRows}
+            <div class="border-t border-emerald-200 pt-1.5 flex justify-between font-bold text-emerald-800 text-sm"><span>보너스 합계:</span> <strong>+${bonusTotal.toLocaleString()}원</strong></div>
           </div>
         `;
       }
@@ -1456,12 +1429,12 @@ class AppUI {
     const c = this.contracts.find(item => item.id === contractId);
     if (!c) return;
 
-    const isSenior = GfcAdvancedEngine.calculateTenureMonth(this.settings.joinDate) > 24;
+    const isSenior = GfcAdvancedEngine.calculateTenureMonth(this.settings.joinDate, new Date(c.startDate)) > 24;
     const premium = Number(c.premium) || 0;
     const surrender16 = Number(c.surrenderValue16) || 0;
 
     const feeRates = GfcAdvancedEngine.getFeeSchedule(c.productGroup, isSenior);
-    const totalComm = feeRates.reduce((a, b) => a + premium * (b / 100), 0);
+    const totalComm = GfcAdvancedEngine.calculateTotalCommissionThrough15Rounds(c, feeRates);
     
     const promotions = c.promotions || [];
     const totalPromoCalc = promotions.reduce((sum, p) => {
@@ -1476,8 +1449,18 @@ class AppUI {
     const netProfitAt16 = totalIncomeNet + surrender16 - totalExpense15;
 
     let monthlyCommRows = feeRates.map((rate, idx) => {
-      let comm = premium * (rate / 100);
-      return `<div class="flex justify-between py-1 border-b border-slate-100"><span>${idx + 1}회차 (환산율 ${rate}%):</span> <strong class="text-emerald-600">+${Math.round(comm).toLocaleString()}원</strong></div>`;
+      const combinedRate = GfcAdvancedEngine.getCombinedCommissionRate(c.productGroup, idx, feeRates);
+      const mgmtRate = combinedRate - rate;
+      let comm = premium * (combinedRate / 100);
+      let extra = '';
+      if (mgmtRate > 0) extra += ` (신계약 ${rate}% + 계약관리보너스 ${mgmtRate}%)`;
+      if (c.productGroup === '건강/상해보험' && idx === 12) {
+        const tp = Number(c.tp) || 0;
+        const healthBonus = tp * 1.80;
+        comm += healthBonus;
+        extra += ` + 건강상해보너스(TP×180%) ${Math.round(healthBonus).toLocaleString()}원`;
+      }
+      return `<div class="flex justify-between py-1 border-b border-slate-100"><span>${idx + 1}회차 (환산율 ${combinedRate}%)${extra}:</span> <strong class="text-emerald-600">+${Math.round(comm).toLocaleString()}원</strong></div>`;
     }).join('');
 
     let promoRows = promotions.map((p, idx) => {
@@ -1642,6 +1625,11 @@ class AppUI {
       memo: document.getElementById('form-memo').value.trim()
     };
 
+    if (!contractData.client || !contractData.title || contractData.premium < 0) {
+      alert('필수 입력값이 누락되었거나 잘못된 형식입니다. (계약자명/상품명/보험료를 확인해주세요)');
+      return;
+    }
+
     console.log('Saving contract data:', contractData);
 
     try {
@@ -1675,40 +1663,6 @@ class AppUI {
     }
   }
 
-  exportData() {
-    const jsonStr = JSON.stringify(this.contracts, null, 2);
-    const blob = new Blob([jsonStr], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `gfc_premium_manager_${new Date().toISOString().split('T')[0]}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
-  }
-
-  importData(e) {
-    const file = e.target.files[0];
-    if (!file) return;
-
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      try {
-        const imported = JSON.parse(event.target.result);
-        if (Array.isArray(imported)) {
-          ContractStore.saveContracts(imported);
-          this.contracts = imported;
-          this.renderAll();
-          alert('성공적으로 데이터를 불러왔습니다.');
-        } else {
-          alert('올바르지 않은 JSON 데이터 형식입니다.');
-        }
-      } catch (err) {
-        alert('파일을 읽는 중 오류가 발생했습니다: ' + err.message);
-      }
-    };
-    reader.readAsText(file);
-    e.target.value = '';
-  }
 }
 
 // Global App Instance
