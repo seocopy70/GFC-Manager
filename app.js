@@ -490,12 +490,14 @@ class GfcAdvancedEngine {
       const isTerminatedBeforeThisMonth = (status === '해지' || status === '실효') && (elapsedMonths >= terminationMonth);
       const isTerminatedThisMonth = (status === '해지' || status === '실효') && (elapsedMonths === terminationMonth);
 
-      if (elapsedMonths >= 0 && !isTerminatedBeforeThisMonth) {
-        const rate = this.getCombinedCommissionRate(contract.productGroup, elapsedMonths, feeRates);
+      // 수수료는 익월 지급: 계약 등록월(elapsedMonths=0)에는 수수료 0, 익월부터 초회분 지급
+      if (elapsedMonths >= 1 && !isTerminatedBeforeThisMonth) {
+        const feeIndex = elapsedMonths - 1; // 익월에 초회분(feeRates[0]) 지급
+        const rate = this.getCombinedCommissionRate(contract.productGroup, feeIndex, feeRates);
         commissionIncome = premium * (rate / 100);
 
-        // 건강상해보너스: 건강/상해보험이 13회차까지 유지되면 1회성으로 환산성적(TP)×180% 지급
-        if (contract.productGroup === '건강/상해보험' && elapsedMonths === 12) {
+        // 건강상해보너스: 건강/상해보험 13회차 유지 시 익월(=elapsedMonths 13)에 1회성 지급
+        if (contract.productGroup === '건강/상해보험' && elapsedMonths === 13) {
           const tp = Number(contract.tp) || 0;
           commissionIncome += tp * 1.80;
         }
