@@ -444,7 +444,7 @@ class GfcAdvancedEngine {
     let total = 0;
     for (let elapsed = 0; elapsed < 15; elapsed++) {
       const rate = this.getCombinedCommissionRate(contract.productGroup, elapsed, feeRates);
-      total += premium * (rate / 100);
+      total += tp * (rate / 100);
     }
     if (contract.productGroup === '건강/상해보험') {
       total += tp * 1.80; // 13회차 건강상해보너스
@@ -469,6 +469,7 @@ class GfcAdvancedEngine {
     const rangeStart = baseDate instanceof Date ? baseDate : new Date();
 
     const premium = Number(contract.premium) || 0;
+    const tp = Number(contract.tp) || 0;
     // 신인/시니어 수수료 구조는 "계약 체결 시점"의 위촉차월 기준으로 고정된다.
     // (오늘 날짜나 예측 대상월 기준으로 계산하면, 실제로는 신인 구조로 체결된 과거 계약이
     //  플래너가 25차월을 넘긴 뒤에는 시니어 구조로 잘못 표시되는 오류가 생김)
@@ -500,11 +501,10 @@ class GfcAdvancedEngine {
 
       if (incomeRoundIndex >= 0 && !incomeRoundWasNotPaid) {
         const rate = this.getCombinedCommissionRate(contract.productGroup, incomeRoundIndex, feeRates);
-        commissionIncome = premium * (rate / 100);
+        commissionIncome = tp * (rate / 100);
 
         // 건강상해보너스: 건강/상해보험이 13회차까지 유지되면 1회성으로 환산성적(TP)×180% 지급
         if (contract.productGroup === '건강/상해보험' && incomeRoundIndex === 12) {
-          const tp = Number(contract.tp) || 0;
           commissionIncome += tp * 1.80;
         }
       }
@@ -547,7 +547,7 @@ class GfcAdvancedEngine {
           let cumulativeCommission = 0;
           for (let pastElapsed = 0; pastElapsed < terminationMonth; pastElapsed++) {
             const pastRate = this.getCombinedCommissionRate(contract.productGroup, pastElapsed, feeRates);
-            cumulativeCommission += premium * (pastRate / 100);
+            cumulativeCommission += tp * (pastRate / 100);
           }
           clawbackAmount += Math.round(cumulativeCommission * (clawbackRate / 100));
         }
@@ -631,10 +631,11 @@ class GfcAdvancedEngine {
         plannerBonus += this.calculateRetentionBonus(contracts, joinDateStr, productionDate);
         // 신인성과보너스 개별계약 환수 (해당월 해지/실효 계약분)
         plannerBonus -= this.calculateNewPlannerBonusClawback(contracts, joinDateStr, targetDate);
-        // GFC 교육비: 등록월(위촉 1차월) 익월 1회성 80만원 (규정집 "등록 익일 지급"과 동일한 원리)
-        if (productionTenureMonth === 1) {
-          plannerBonus += 800000;
-        }
+      }
+      // GFC 교육비: 익월지급 지원금과 달리 등록월(위촉 1차월) 그 자체에 1회성으로 80만원 지급
+      // (calculateTenureMonth는 등록월 이전도 클램프로 "1"을 반환하므로, 반드시 연/월을 직접 비교해야 함)
+      if (!onlySelf && targetDate.getFullYear() === joinY && targetDate.getMonth() === (joinM - 1)) {
+        plannerBonus += 800000;
       }
 
       return {
@@ -1311,7 +1312,7 @@ class AppUI {
       let bonusBreakdown = '';
       const retentionBonus = GfcAdvancedEngine.calculateRetentionBonus(this.contracts, this.settings.joinDate, productionDate);
       const bonusClawback = GfcAdvancedEngine.calculateNewPlannerBonusClawback(this.contracts, this.settings.joinDate, targetDate);
-      const eduBonus = (tMonth === 1) ? 800000 : 0;
+      const eduBonus = (targetDate.getFullYear() === joinY && targetDate.getMonth() === (joinM - 1)) ? 800000 : 0;
       const extraRows = `
             ${retentionBonus > 0 ? `<div class="flex justify-between"><span>신인 유지보너스 (13~18차월 유지TP 기준):</span> <strong>+${retentionBonus.toLocaleString()}원</strong></div>` : ''}
             ${eduBonus > 0 ? `<div class="flex justify-between"><span>GFC 교육비 (등록월 1회성):</span> <strong>+${eduBonus.toLocaleString()}원</strong></div>` : ''}
@@ -1467,6 +1468,7 @@ class AppUI {
 
     const isSenior = GfcAdvancedEngine.calculateTenureMonth(this.settings.joinDate, new Date(c.startDate)) > 24;
     const premium = Number(c.premium) || 0;
+    const tp = Number(c.tp) || 0;
     const surrender16 = Number(c.surrenderValue16) || 0;
 
     const feeRates = GfcAdvancedEngine.getFeeSchedule(c.productGroup, isSenior);
@@ -1487,11 +1489,10 @@ class AppUI {
     let monthlyCommRows = feeRates.map((rate, idx) => {
       const combinedRate = GfcAdvancedEngine.getCombinedCommissionRate(c.productGroup, idx, feeRates);
       const mgmtRate = combinedRate - rate;
-      let comm = premium * (combinedRate / 100);
+      let comm = tp * (combinedRate / 100);
       let extra = '';
       if (mgmtRate > 0) extra += ` (신계약 ${rate}% + 계약관리보너스 ${mgmtRate}%)`;
       if (c.productGroup === '건강/상해보험' && idx === 12) {
-        const tp = Number(c.tp) || 0;
         const healthBonus = tp * 1.80;
         comm += healthBonus;
         extra += ` + 건강상해보너스(TP×180%) ${Math.round(healthBonus).toLocaleString()}원`;
