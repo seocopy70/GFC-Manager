@@ -593,25 +593,35 @@ class GfcAdvancedEngine {
       // 그래서 계약이 막 시작된 바로 그 달에는 그 계약의 TP가 아직 지원금에 반영되지 않아야 하고,
       // 다음 달 지원금 계산에 반영되어야 한다.
       const productionDate = new Date(targetDate.getFullYear(), targetDate.getMonth() - 1, 1);
-      const productionTenureMonth = this.calculateTenureMonth(joinDateStr, productionDate);
+
+      // calculateTenureMonth는 위촉일 이전 날짜도 Math.max(1, ...) 클램프 때문에 "1차월"로 반환한다.
+      // 그래서 등록월 이전(=아직 위촉 전) 시점을 그대로 넘기면 등록월 직전 달까지 "1차월"로 오인되어
+      // GFC교육비(80만원) 등 신인 1차월 지원금이 등록월과 다음달 두 번 지급되는 버그가 있었다.
+      // 실제 위촉일 이전이면 지원금 계산 자체를 건너뛴다.
+      const [joinY, joinM] = (joinDateStr || '2025-01').split('-').map(Number);
+      const productionBeforeJoin = productionDate.getFullYear() < joinY ||
+        (productionDate.getFullYear() === joinY && productionDate.getMonth() < (joinM - 1));
+      const productionTenureMonth = productionBeforeJoin ? 0 : this.calculateTenureMonth(joinDateStr, productionDate);
 
       let monthlyTP = 0;
-      contracts.forEach(c => {
-        if (c.status === '정상유지') {
-          const startDate = new Date(c.startDate);
-          const contractYear = startDate.getFullYear();
-          const contractMonth = startDate.getMonth();
-          const prodYear = productionDate.getFullYear();
-          const prodMonth = productionDate.getMonth();
+      if (!productionBeforeJoin) {
+        contracts.forEach(c => {
+          if (c.status === '정상유지') {
+            const startDate = new Date(c.startDate);
+            const contractYear = startDate.getFullYear();
+            const contractMonth = startDate.getMonth();
+            const prodYear = productionDate.getFullYear();
+            const prodMonth = productionDate.getMonth();
 
-          if (contractYear === prodYear && contractMonth === prodMonth) {
-            monthlyTP += (Number(c.tp) || 0);
+            if (contractYear === prodYear && contractMonth === prodMonth) {
+              monthlyTP += (Number(c.tp) || 0);
+            }
           }
-        }
-      });
+        });
+      }
 
       let plannerBonus = 0;
-      if (!onlySelf) {
+      if (!onlySelf && !productionBeforeJoin) {
         if (productionTenureMonth <= 24) {
           plannerBonus = this.getNewPlannerSupport(productionTenureMonth, monthlyTP);
         } else {
@@ -1241,19 +1251,24 @@ class AppUI {
       // 신인/시니어 지원금은 "이번 달 실적"이 아니라 "지난 달 실적"을 기준으로 이번 달에 지급된다
       // (익월 지급 원칙 — calculateAggregatedCashflow와 반드시 동일한 기준을 써야 지원금 합계가 일치함)
       const productionDate = new Date(targetDate.getFullYear(), targetDate.getMonth() - 1, 1);
-      const tMonth = GfcAdvancedEngine.calculateTenureMonth(this.settings.joinDate, productionDate);
+      const [joinY, joinM] = (this.settings.joinDate || '2025-01').split('-').map(Number);
+      const productionBeforeJoin = productionDate.getFullYear() < joinY ||
+        (productionDate.getFullYear() === joinY && productionDate.getMonth() < (joinM - 1));
+      const tMonth = productionBeforeJoin ? 0 : GfcAdvancedEngine.calculateTenureMonth(this.settings.joinDate, productionDate);
       const isSen = tMonth > 24;
 
       // 지난 달(전월) "신규" TP (그 달에 시작된 계약만) — KPI 집계 엔진(calculateAggregatedCashflow)과
       // 동일한 기준이어야 지원금 합계가 일치함. 정착수수료/성과보너스는 전월 신규 TP 기준으로 산정됨.
       let newContractTP = 0;
-      this.contracts.forEach(c => {
-        if (c.status !== '정상유지') return;
-        const startDate = new Date(c.startDate);
-        if (startDate.getFullYear() === productionDate.getFullYear() && startDate.getMonth() === productionDate.getMonth()) {
-          newContractTP += (Number(c.tp) || 0);
-        }
-      });
+      if (!productionBeforeJoin) {
+        this.contracts.forEach(c => {
+          if (c.status !== '정상유지') return;
+          const startDate = new Date(c.startDate);
+          if (startDate.getFullYear() === productionDate.getFullYear() && startDate.getMonth() === productionDate.getMonth()) {
+            newContractTP += (Number(c.tp) || 0);
+          }
+        });
+      }
 
       // 당월 수수료·시책이 발생하는 계약들의 TP 합계 (1~60회차 진행 중인 전체 계약, 표시용)
       // 수수료는 납입 다음 달에 지급되므로, "이번 달에 지급되는 수수료"는 전월(elapsed-1) 납입분 기준이다.
