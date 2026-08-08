@@ -490,32 +490,41 @@ class GfcAdvancedEngine {
       const isTerminatedBeforeThisMonth = (status === '해지' || status === '실효') && (elapsedMonths >= terminationMonth);
       const isTerminatedThisMonth = (status === '해지' || status === '실효') && (elapsedMonths === terminationMonth);
 
-      // 수수료는 익월 지급: 계약 등록월(elapsedMonths=0)에는 수수료 0, 익월부터 초회분 지급
-      if (elapsedMonths >= 1 && !isTerminatedBeforeThisMonth) {
-        const feeIndex = elapsedMonths - 1; // 익월에 초회분(feeRates[0]) 지급
-        const rate = this.getCombinedCommissionRate(contract.productGroup, feeIndex, feeRates);
+      // 수수료는 "납입 시점"이 아니라 "납입 다음 달"에 지급된다 (규정집 시책 문구 "N회차 납입 후 익월 지급"과 동일한 원리).
+      // 그래서 계약 시작월(elapsedMonths=0)에는 아직 지급될 수수료가 없고, 실제로는 1회차 납입분 수수료가
+      // 다음 달(elapsedMonths=1)에 들어온다. incomeRoundIndex는 "이번 달에 지급되는 수수료가 몇 회차 납입분인지"를
+      // feeRates 배열 인덱스(0-based)로 나타낸다.
+      const incomeRoundIndex = elapsedMonths - 1;
+      // 이번 달에 지급되는 수수료의 원천이 된 납입회차(incomeRoundIndex)가 실제로 해지 전에 납입되었는지 확인
+      const incomeRoundWasNotPaid = (status === '해지' || status === '실효') && (incomeRoundIndex >= terminationMonth);
+
+      if (incomeRoundIndex >= 0 && !incomeRoundWasNotPaid) {
+        const rate = this.getCombinedCommissionRate(contract.productGroup, incomeRoundIndex, feeRates);
         commissionIncome = premium * (rate / 100);
 
-        // 건강상해보너스: 건강/상해보험 13회차 유지 시 익월(=elapsedMonths 13)에 1회성 지급
-        if (contract.productGroup === '건강/상해보험' && elapsedMonths === 13) {
+        // 건강상해보너스: 건강/상해보험이 13회차까지 유지되면 1회성으로 환산성적(TP)×180% 지급
+        if (contract.productGroup === '건강/상해보험' && incomeRoundIndex === 12) {
           const tp = Number(contract.tp) || 0;
           commissionIncome += tp * 1.80;
         }
       }
 
-      // 시책은 수수료(1~15회차)와 별개의 조건이므로, 납입회차가 15회차를 넘는 시책도
-      // (해지 전이라면) 정상적으로 지급되어야 함 — 이전 코드는 위 15개월 블록 안에 있어서
-      // 16회차 이후로 설정된 시책은 절대 지급되지 않는 버그가 있었음
-      if (!isTerminatedBeforeThisMonth) {
-        promotions.forEach(promo => {
-          const targetDepositMonth = Number(promo.afterPaymentMonth) || 1;
-          if (elapsedMonths === targetDepositMonth) {
+      // 시책도 "N회차 납입 후 익월 지급"이므로, 지급월(targetDepositMonth) 시점이 아니라 그 시책의
+      // 근거가 된 납입회차(targetDepositMonth-1)가 실제로 해지 전에 납입되었는지로 게이팅해야 정확하다.
+      // (기존엔 지급월 자체가 해지월 이후인지만 봐서, "해지 직전 회차 납입 후 익월 지급"인 시책이
+      //  지급월이 하필 해지월과 같거나 그 이후로 계산되면 정상 지급분까지 누락되는 경우가 있었음)
+      promotions.forEach(promo => {
+        const targetDepositMonth = Number(promo.afterPaymentMonth) || 1;
+        if (elapsedMonths === targetDepositMonth) {
+          const promoPaymentRoundIndex = targetDepositMonth - 1;
+          const promoRoundWasNotPaid = (status === '해지' || status === '실효') && (promoPaymentRoundIndex >= terminationMonth);
+          if (!promoRoundWasNotPaid) {
             let pVal = Number(promo.value) || 0;
             let earnedPromo = promo.type === 'percent' ? premium * (pVal / 100) : pVal;
             promoIncome += earnedPromo;
           }
-        });
-      }
+        }
+      });
 
       if (isTerminatedThisMonth) {
         // (1) 시책 환수: 25차월 이내 해지 시 기지급 시책의 70% 환수
@@ -579,7 +588,12 @@ class GfcAdvancedEngine {
     const rangeStart = baseDate instanceof Date ? baseDate : new Date();
     const result = Array.from({ length: horizonMonths }, (_, m) => {
       const targetDate = new Date(rangeStart.getFullYear(), rangeStart.getMonth() + m, 1);
-      const tenureMonth = this.calculateTenureMonth(joinDateStr, targetDate);
+      // 신인/시니어 지원금(정착수수료·성과보너스·업적분·클럽분 등)도 계약 수수료와 동일하게
+      // "이번 달 실적"이 아니라 "지난 달 실적"을 기준으로 이번 달에 지급된다 (익월 지급 원칙).
+      // 그래서 계약이 막 시작된 바로 그 달에는 그 계약의 TP가 아직 지원금에 반영되지 않아야 하고,
+      // 다음 달 지원금 계산에 반영되어야 한다.
+      const productionDate = new Date(targetDate.getFullYear(), targetDate.getMonth() - 1, 1);
+      const productionTenureMonth = this.calculateTenureMonth(joinDateStr, productionDate);
 
       let monthlyTP = 0;
       contracts.forEach(c => {
@@ -587,10 +601,10 @@ class GfcAdvancedEngine {
           const startDate = new Date(c.startDate);
           const contractYear = startDate.getFullYear();
           const contractMonth = startDate.getMonth();
-          const targetYear = targetDate.getFullYear();
-          const targetMonth = targetDate.getMonth();
+          const prodYear = productionDate.getFullYear();
+          const prodMonth = productionDate.getMonth();
 
-          if (contractYear === targetYear && contractMonth === targetMonth) {
+          if (contractYear === prodYear && contractMonth === prodMonth) {
             monthlyTP += (Number(c.tp) || 0);
           }
         }
@@ -598,17 +612,17 @@ class GfcAdvancedEngine {
 
       let plannerBonus = 0;
       if (!onlySelf) {
-        if (tenureMonth <= 24) {
-          plannerBonus = this.getNewPlannerSupport(tenureMonth, monthlyTP);
+        if (productionTenureMonth <= 24) {
+          plannerBonus = this.getNewPlannerSupport(productionTenureMonth, monthlyTP);
         } else {
           plannerBonus = this.calculateSeniorPerformanceBonus(monthlyTP, clubKey);
         }
-        // 신인 유지보너스 (13~18차월, 신인 1~11차월 모집계약 유지TP 기준)
-        plannerBonus += this.calculateRetentionBonus(contracts, joinDateStr, targetDate);
+        // 신인 유지보너스 (13~18차월, 신인 1~11차월 모집계약 유지TP 기준) — 마찬가지로 전월 기준 익월 지급
+        plannerBonus += this.calculateRetentionBonus(contracts, joinDateStr, productionDate);
         // 신인성과보너스 개별계약 환수 (해당월 해지/실효 계약분)
         plannerBonus -= this.calculateNewPlannerBonusClawback(contracts, joinDateStr, targetDate);
-        // GFC 교육비: 등록월(위촉 1차월) 1회성 80만원 (등록 익일 지급, 0차월 교육수료 기준)
-        if (tenureMonth === 1) {
+        // GFC 교육비: 등록월(위촉 1차월) 익월 1회성 80만원 (규정집 "등록 익일 지급"과 동일한 원리)
+        if (productionTenureMonth === 1) {
           plannerBonus += 800000;
         }
       }
@@ -1224,33 +1238,38 @@ class AppUI {
     const renderMonthDetail = (mIdx) => {
       const item = aggregated[mIdx] || aggregated[0];
       const targetDate = new Date(baseDate.getFullYear(), baseDate.getMonth() + mIdx, 1);
-      const tMonth = GfcAdvancedEngine.calculateTenureMonth(this.settings.joinDate, targetDate);
+      // 신인/시니어 지원금은 "이번 달 실적"이 아니라 "지난 달 실적"을 기준으로 이번 달에 지급된다
+      // (익월 지급 원칙 — calculateAggregatedCashflow와 반드시 동일한 기준을 써야 지원금 합계가 일치함)
+      const productionDate = new Date(targetDate.getFullYear(), targetDate.getMonth() - 1, 1);
+      const tMonth = GfcAdvancedEngine.calculateTenureMonth(this.settings.joinDate, productionDate);
       const isSen = tMonth > 24;
 
-      // 당월 "신규" TP (그 달에 시작된 계약만) — KPI 집계 엔진(calculateAggregatedCashflow)과
-      // 동일한 기준이어야 지원금 합계가 일치함. 정착수수료/성과보너스는 신규 TP 기준으로 산정됨.
+      // 지난 달(전월) "신규" TP (그 달에 시작된 계약만) — KPI 집계 엔진(calculateAggregatedCashflow)과
+      // 동일한 기준이어야 지원금 합계가 일치함. 정착수수료/성과보너스는 전월 신규 TP 기준으로 산정됨.
       let newContractTP = 0;
       this.contracts.forEach(c => {
         if (c.status !== '정상유지') return;
         const startDate = new Date(c.startDate);
-        if (startDate.getFullYear() === targetDate.getFullYear() && startDate.getMonth() === targetDate.getMonth()) {
+        if (startDate.getFullYear() === productionDate.getFullYear() && startDate.getMonth() === productionDate.getMonth()) {
           newContractTP += (Number(c.tp) || 0);
         }
       });
 
       // 당월 수수료·시책이 발생하는 계약들의 TP 합계 (1~60회차 진행 중인 전체 계약, 표시용)
+      // 수수료는 납입 다음 달에 지급되므로, "이번 달에 지급되는 수수료"는 전월(elapsed-1) 납입분 기준이다.
       let totalTP = 0;
       let contractRows = this.contracts.map(c => {
         if (c.status !== '정상유지') return '';
         const startDate = new Date(c.startDate);
         const elapsed = (targetDate.getFullYear() - startDate.getFullYear()) * 12 + (targetDate.getMonth() - startDate.getMonth());
-        if (elapsed < 0 || elapsed >= 60) return '';
+        const incomeRoundIndex = elapsed - 1;
+        if (incomeRoundIndex < 0 || incomeRoundIndex >= 60) return '';
 
         const tp = Number(c.tp) || 0;
 
         const feeRates = GfcAdvancedEngine.getFeeSchedule(c.productGroup, isSen);
-        const rate = GfcAdvancedEngine.getCombinedCommissionRate(c.productGroup, elapsed, feeRates);
-        if (rate <= 0 && !(c.productGroup === '건강/상해보험' && elapsed === 12)) return '';
+        const rate = GfcAdvancedEngine.getCombinedCommissionRate(c.productGroup, incomeRoundIndex, feeRates);
+        if (rate <= 0 && !(c.productGroup === '건강/상해보험' && incomeRoundIndex === 12)) return '';
 
         totalTP += tp;
 
@@ -1267,7 +1286,7 @@ class AppUI {
               <span class="text-emerald-600">+${Math.round(comm + promo).toLocaleString()}원</span>
             </div>
             <div class="text-[11px] text-slate-500 flex justify-between">
-              <span>납입 ${elapsed + 1}회차 (수수료율 ${rate}%) | TP: ${tp.toLocaleString()}원</span>
+              <span>${incomeRoundIndex + 1}회차 납입분 수수료 지급 (수수료율 ${rate}%) | TP: ${tp.toLocaleString()}원</span>
               <span>수수료: ${Math.round(comm).toLocaleString()}원 / 시책: ${Math.round(promo).toLocaleString()}원</span>
             </div>
           </div>
@@ -1275,7 +1294,7 @@ class AppUI {
       }).filter(Boolean).join('');
 
       let bonusBreakdown = '';
-      const retentionBonus = GfcAdvancedEngine.calculateRetentionBonus(this.contracts, this.settings.joinDate, targetDate);
+      const retentionBonus = GfcAdvancedEngine.calculateRetentionBonus(this.contracts, this.settings.joinDate, productionDate);
       const bonusClawback = GfcAdvancedEngine.calculateNewPlannerBonusClawback(this.contracts, this.settings.joinDate, targetDate);
       const eduBonus = (tMonth === 1) ? 800000 : 0;
       const extraRows = `
