@@ -436,7 +436,7 @@ class GfcAdvancedEngine {
     return rate;
   }
 
-  // 1~15회차까지 발생하는 총 수수료(신계약수수료 + 13~15회 계약관리보너스 + 13회차 건강상해보너스)
+  // 1~15회차까지 발생하는 총 수수료(신계약수수료 + 13~15회 계약관리보너스)
   // 자기계약 "16회차 해지 수지분석"에서 공용으로 사용
   static calculateTotalCommissionThrough15Rounds(contract, feeRates) {
     const premium = Number(contract.premium) || 0;
@@ -446,10 +446,24 @@ class GfcAdvancedEngine {
       const rate = this.getCombinedCommissionRate(contract.productGroup, elapsed, feeRates);
       total += tp * (rate / 100);
     }
-    if (contract.productGroup === '건강/상해보험') {
-      total += tp * 1.80; // 13회차 건강상해보너스
-    }
     return total;
+  }
+
+  // 시책/프로모션 데이터 정규화: { name, payouts:[{type,value,afterPaymentMonth}, ...] } 형태로 통일.
+  // 구버전 데이터({type,value,afterPaymentMonth}가 최상위에 바로 있는 형태)도 그대로 지원한다.
+  static normalizePromotions(promotions) {
+    if (!Array.isArray(promotions)) return [];
+    return promotions.map((p, idx) => {
+      if (p && Array.isArray(p.payouts)) {
+        return { name: p.name || `시책 ${idx + 1}`, payouts: p.payouts };
+      }
+      return { name: (p && p.name) || `시책 ${idx + 1}`, payouts: [{ type: p.type, value: p.value, afterPaymentMonth: p.afterPaymentMonth }] };
+    });
+  }
+
+  // 계산에는 그룹명이 필요 없으므로, 모든 시책 그룹의 payouts만 하나의 배열로 평탄화
+  static flattenPromotionPayouts(promotions) {
+    return this.normalizePromotions(promotions).flatMap(g => g.payouts);
   }
 
   static getFeeSchedule(productGroup, isSenior = false) {
@@ -475,7 +489,7 @@ class GfcAdvancedEngine {
     //  플래너가 25차월을 넘긴 뒤에는 시니어 구조로 잘못 표시되는 오류가 생김)
     const isSenior = this.calculateTenureMonth(joinDateStr, startDate) > 24;
     const feeRates = this.getFeeSchedule(contract.productGroup, isSenior);
-    const promotions = contract.promotions || [];
+    const promotionPayouts = this.flattenPromotionPayouts(contract.promotions);
     const status = contract.status || '정상유지';
     const terminationMonth = Number(contract.terminationMonth) || 6;
 
@@ -502,18 +516,13 @@ class GfcAdvancedEngine {
       if (incomeRoundIndex >= 0 && !incomeRoundWasNotPaid) {
         const rate = this.getCombinedCommissionRate(contract.productGroup, incomeRoundIndex, feeRates);
         commissionIncome = tp * (rate / 100);
-
-        // 건강상해보너스: 건강/상해보험이 13회차까지 유지되면 1회성으로 환산성적(TP)×180% 지급
-        if (contract.productGroup === '건강/상해보험' && incomeRoundIndex === 12) {
-          commissionIncome += tp * 1.80;
-        }
       }
 
       // 시책도 "N회차 납입 후 익월 지급"이므로, 지급월(targetDepositMonth) 시점이 아니라 그 시책의
       // 근거가 된 납입회차(targetDepositMonth-1)가 실제로 해지 전에 납입되었는지로 게이팅해야 정확하다.
       // (기존엔 지급월 자체가 해지월 이후인지만 봐서, "해지 직전 회차 납입 후 익월 지급"인 시책이
       //  지급월이 하필 해지월과 같거나 그 이후로 계산되면 정상 지급분까지 누락되는 경우가 있었음)
-      promotions.forEach(promo => {
+      promotionPayouts.forEach(promo => {
         const targetDepositMonth = Number(promo.afterPaymentMonth) || 1;
         if (elapsedMonths === targetDepositMonth) {
           const promoPaymentRoundIndex = targetDepositMonth - 1;
@@ -530,7 +539,7 @@ class GfcAdvancedEngine {
         // (1) 시책 환수: 25차월 이내 해지 시 기지급 시책의 70% 환수
         if (terminationMonth < 25) {
           let totalPromoReceived = 0;
-          promotions.forEach(promo => {
+          promotionPayouts.forEach(promo => {
             const targetDepositMonth = Number(promo.afterPaymentMonth) || 1;
             if (targetDepositMonth <= terminationMonth) {
               let pVal = Number(promo.value) || 0;
@@ -750,7 +759,7 @@ class AppUI {
     this.btnOpenModal.addEventListener('click', () => this.openModal());
     this.btnCloseModal.addEventListener('click', () => this.closeModal());
     this.btnCancelModal.addEventListener('click', () => this.closeModal());
-    this.btnAddPromo.addEventListener('click', () => this.addPromoRow());
+    this.btnAddPromo.addEventListener('click', () => this.addPromoGroup());
 
     this.btnOpenRulesModal.addEventListener('click', () => this.rulesModal.classList.remove('hidden'));
     this.btnCloseRulesModal.addEventListener('click', () => this.rulesModal.classList.add('hidden'));
@@ -976,8 +985,7 @@ class AppUI {
       const tp = Number(c.tp) || 0;
       const surrender16 = Number(c.surrenderValue16) || 0;
 
-      const promotions = c.promotions || [];
-      const totalPromoCalc = promotions.reduce((sum, p) => {
+      const totalPromoCalc = GfcAdvancedEngine.flattenPromotionPayouts(c.promotions).reduce((sum, p) => {
         const val = Number(p.value) || 0;
         return sum + (p.type === 'percent' ? premium * (val / 100) : val);
       }, 0);
@@ -1055,8 +1063,7 @@ class AppUI {
       const feeRates = GfcAdvancedEngine.getFeeSchedule(c.productGroup, isSenior);
       const totalComm = GfcAdvancedEngine.calculateTotalCommissionThrough15Rounds(c, feeRates);
       
-      const promotions = c.promotions || [];
-      const totalPromoCalc = promotions.reduce((sum, p) => {
+      const totalPromoCalc = GfcAdvancedEngine.flattenPromotionPayouts(c.promotions).reduce((sum, p) => {
         const val = Number(p.value) || 0;
         return sum + (p.type === 'percent' ? premium * (val / 100) : val);
       }, 0);
@@ -1474,8 +1481,8 @@ class AppUI {
     const feeRates = GfcAdvancedEngine.getFeeSchedule(c.productGroup, isSenior);
     const totalComm = GfcAdvancedEngine.calculateTotalCommissionThrough15Rounds(c, feeRates);
     
-    const promotions = c.promotions || [];
-    const totalPromoCalc = promotions.reduce((sum, p) => {
+    const promotions = GfcAdvancedEngine.normalizePromotions(c.promotions);
+    const totalPromoCalc = GfcAdvancedEngine.flattenPromotionPayouts(c.promotions).reduce((sum, p) => {
       const val = Number(p.value) || 0;
       return sum + (p.type === 'percent' ? premium * (val / 100) : val);
     }, 0);
@@ -1492,18 +1499,13 @@ class AppUI {
       let comm = tp * (combinedRate / 100);
       let extra = '';
       if (mgmtRate > 0) extra += ` (신계약 ${rate}% + 계약관리보너스 ${mgmtRate}%)`;
-      if (c.productGroup === '건강/상해보험' && idx === 12) {
-        const healthBonus = tp * 1.80;
-        comm += healthBonus;
-        extra += ` + 건강상해보너스(TP×180%) ${Math.round(healthBonus).toLocaleString()}원`;
-      }
       return `<div class="flex justify-between py-1 border-b border-slate-100"><span>${idx + 1}회차 (환산율 ${combinedRate}%)${extra}:</span> <strong class="text-emerald-600">+${Math.round(comm).toLocaleString()}원</strong></div>`;
     }).join('');
 
-    let promoRows = promotions.map((p, idx) => {
+    let promoRows = promotions.flatMap(g => g.payouts.map(p => ({ name: g.name, ...p }))).map((p) => {
       let val = Number(p.value) || 0;
       let earned = p.type === 'percent' ? premium * (val / 100) : val;
-      return `<div class="flex justify-between py-1 border-b border-slate-100"><span>시책 #${idx + 1} (${p.afterPaymentMonth}회차 납입 후 익월):</span> <strong class="text-emerald-600">+${Math.round(earned).toLocaleString()}원</strong></div>`;
+      return `<div class="flex justify-between py-1 border-b border-slate-100"><span>${p.name} (${p.afterPaymentMonth}회차 납입 후 익월):</span> <strong class="text-emerald-600">+${Math.round(earned).toLocaleString()}원</strong></div>`;
     }).join('') || '<p class="text-slate-400">적용된 시책이 없습니다.</p>';
 
     let htmlContent = `
@@ -1544,25 +1546,62 @@ class AppUI {
     lucide.createIcons();
   }
 
-  addPromoRow(promo = null) {
+  addPromoGroup(promo = null) {
     const div = document.createElement('div');
-    div.className = 'flex items-center gap-2 bg-white p-2.5 rounded-lg border border-emerald-200 promo-row';
+    div.className = 'promo-group bg-white rounded-lg border border-emerald-200 p-2.5 space-y-2';
     div.innerHTML = `
+      <div class="flex items-center gap-2">
+        <input type="text" class="promo-name flex-1 px-2 py-1.5 bg-slate-50 border border-slate-300 rounded text-xs font-semibold focus:ring-2 focus:ring-emerald-500 focus:outline-none" placeholder="시책/프로모션 명칭 (예: 변액전환 시책)">
+        <button type="button" class="btn-remove-promo-group text-rose-500 hover:text-rose-700 p-1" title="이 시책 전체 삭제">
+          <i data-lucide="trash-2" class="w-4 h-4"></i>
+        </button>
+      </div>
+      <div class="promo-payouts-container space-y-1.5"></div>
+      <button type="button" class="btn-add-promo-payout text-[11px] text-emerald-700 hover:text-emerald-900 font-medium flex items-center gap-1">
+        <i data-lucide="plus" class="w-3 h-3"></i> 회차/금액 추가
+      </button>
+    `;
+    this.promotionsContainer.appendChild(div);
+
+    div.querySelector('.promo-name').value = (promo && promo.name) ? promo.name : '';
+    div.querySelector('.btn-remove-promo-group').addEventListener('click', () => div.remove());
+
+    const payoutsContainer = div.querySelector('.promo-payouts-container');
+    div.querySelector('.btn-add-promo-payout').addEventListener('click', () => this.addPromoPayoutRow(payoutsContainer));
+
+    const payouts = (promo && Array.isArray(promo.payouts) && promo.payouts.length > 0)
+      ? promo.payouts
+      : [{ type: 'percent', value: 300, afterPaymentMonth: 1 }];
+    payouts.forEach(p => this.addPromoPayoutRow(payoutsContainer, p));
+
+    lucide.createIcons();
+  }
+
+  addPromoPayoutRow(payoutsContainer, payout = null) {
+    const row = document.createElement('div');
+    row.className = 'flex items-center gap-2 promo-payout-row';
+    row.innerHTML = `
       <select class="promo-type px-2 py-1.5 bg-slate-50 border border-slate-300 rounded text-xs">
         <option value="percent">월초 대비 (%)</option>
         <option value="amount">고정 금액 (원)</option>
       </select>
-      <input type="number" class="promo-value px-2 py-1.5 bg-slate-50 border border-slate-300 rounded text-xs w-24" placeholder="수치" value="${promo ? promo.value : ''}">
-      <input type="number" class="promo-month px-2 py-1.5 bg-slate-50 border border-slate-300 rounded text-xs w-28" placeholder="납입회차" value="${promo ? promo.afterPaymentMonth : 1}" min="1" max="60" title="N 회차 납입 후 익월 지급">
+      <input type="number" class="promo-value px-2 py-1.5 bg-slate-50 border border-slate-300 rounded text-xs w-24" placeholder="수치" value="${payout ? payout.value : ''}">
+      <input type="number" class="promo-month px-2 py-1.5 bg-slate-50 border border-slate-300 rounded text-xs w-24" placeholder="납입회차" value="${payout ? payout.afterPaymentMonth : 1}" min="1" max="60" title="N 회차 납입 후 익월 지급">
       <span class="text-[10px] text-slate-500 whitespace-nowrap">회차 납입 후 익월</span>
-      <button type="button" onclick="this.closest('.promo-row').remove()" class="ml-auto text-rose-500 hover:text-rose-700 p-1">
-        <i data-lucide="trash-2" class="w-4 h-4"></i>
+      <button type="button" class="btn-remove-promo-payout ml-auto text-rose-400 hover:text-rose-600 p-1">
+        <i data-lucide="x" class="w-3.5 h-3.5"></i>
       </button>
     `;
-    this.promotionsContainer.appendChild(div);
-    if (promo && promo.type) {
-      div.querySelector('.promo-type').value = promo.type;
-    }
+    payoutsContainer.appendChild(row);
+    if (payout && payout.type) row.querySelector('.promo-type').value = payout.type;
+
+    row.querySelector('.btn-remove-promo-payout').addEventListener('click', () => {
+      if (payoutsContainer.querySelectorAll('.promo-payout-row').length > 1) {
+        row.remove();
+      } else {
+        alert('시책 하나에는 최소 1개의 지급 회차가 있어야 합니다. 전체 삭제하려면 시책 카드의 휴지통 버튼을 사용하세요.');
+      }
+    });
     lucide.createIcons();
   }
 
@@ -1605,9 +1644,9 @@ class AppUI {
         document.getElementById('form-memo').value = contract.memo || '';
 
         if (contract.promotions && contract.promotions.length > 0) {
-          contract.promotions.forEach(p => this.addPromoRow(p));
+          GfcAdvancedEngine.normalizePromotions(contract.promotions).forEach(g => this.addPromoGroup(g));
         } else {
-          this.addPromoRow({ type: 'percent', value: 0, afterPaymentMonth: 1 });
+          this.addPromoGroup();
         }
       }
     } else {
@@ -1618,7 +1657,7 @@ class AppUI {
       document.getElementById('form-status').value = '정상유지';
       surrenderInput.value = 0;
       surrenderInput.dataset.manual = 'false';
-      this.addPromoRow({ type: 'percent', value: 300, afterPaymentMonth: 1 });
+      this.addPromoGroup({ name: '', payouts: [{ type: 'percent', value: 300, afterPaymentMonth: 1 }] });
     }
 
     this.modal.classList.remove('hidden');
@@ -1633,14 +1672,22 @@ class AppUI {
     e.preventDefault();
     const id = document.getElementById('form-id').value;
 
-    const promoRows = this.promotionsContainer.querySelectorAll('.promo-row');
+    const promoGroups = this.promotionsContainer.querySelectorAll('.promo-group');
     const promotions = [];
-    promoRows.forEach(row => {
-      promotions.push({
-        type: row.querySelector('.promo-type').value,
-        value: Number(row.querySelector('.promo-value').value) || 0,
-        afterPaymentMonth: Number(row.querySelector('.promo-month').value) || 1
+    promoGroups.forEach(group => {
+      const name = group.querySelector('.promo-name').value.trim();
+      const payoutRows = group.querySelectorAll('.promo-payout-row');
+      const payouts = [];
+      payoutRows.forEach(row => {
+        payouts.push({
+          type: row.querySelector('.promo-type').value,
+          value: Number(row.querySelector('.promo-value').value) || 0,
+          afterPaymentMonth: Number(row.querySelector('.promo-month').value) || 1
+        });
       });
+      if (payouts.length > 0) {
+        promotions.push({ name: name || '시책', payouts });
+      }
     });
 
     const status = document.getElementById('form-status').value;
