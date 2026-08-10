@@ -474,6 +474,34 @@ class GfcAdvancedEngine {
     return this.normalizePromotions(promotions).flatMap(g => g.payouts);
   }
 
+  // 특정 계약(c)의 TP가 그 달 신규TP 합계에 더해짐으로써 늘어난 신인/시니어 지원금 증분을 계산.
+  // (해당월 신규 TP 합계로 받는 지원금) - (c를 제외한 신규 TP 합계로 받는 지원금)
+  // 자기계약 수지분석에서 "이 계약 덕분에 추가로 받은 정착수수료/성과보너스"를 반영하기 위해 사용.
+  static calculateAttributedTPBonus(contract, allContracts, joinDateStr, clubKey) {
+    const startDate = new Date(contract.startDate);
+    const tenureMonth = this.calculateTenureMonth(joinDateStr, startDate);
+    const myTP = Number(contract.tp) || 0;
+    if (myTP <= 0) return 0;
+
+    let monthlyTPWith = 0;
+    (allContracts || []).forEach(c => {
+      const d = new Date(c.startDate);
+      if (d.getFullYear() === startDate.getFullYear() && d.getMonth() === startDate.getMonth()) {
+        monthlyTPWith += (Number(c.tp) || 0);
+      }
+    });
+    const monthlyTPWithout = Math.max(0, monthlyTPWith - myTP);
+
+    const bonusWith = tenureMonth <= 24
+      ? this.getNewPlannerSupport(tenureMonth, monthlyTPWith)
+      : this.calculateSeniorPerformanceBonus(monthlyTPWith, clubKey);
+    const bonusWithout = tenureMonth <= 24
+      ? this.getNewPlannerSupport(tenureMonth, monthlyTPWithout)
+      : this.calculateSeniorPerformanceBonus(monthlyTPWithout, clubKey);
+
+    return Math.max(0, bonusWith - bonusWithout);
+  }
+
   static getFeeSchedule(productGroup, isSenior = false) {
     if (!isSenior) {
       if (productGroup === '종신/GI 보험') return [112, 8,8,8,8,8,8,8,8,8,8,8, 20,20, 12];
@@ -1071,43 +1099,30 @@ class AppUI {
 
       const feeRates = GfcAdvancedEngine.getFeeSchedule(c.productGroup, isSenior);
       const totalComm = GfcAdvancedEngine.calculateTotalCommissionThrough15Rounds(c, feeRates);
-      
+
       const totalPromoCalc = GfcAdvancedEngine.flattenPromotionPayouts(c.promotions).reduce((sum, p) => {
         const val = Number(p.value) || 0;
         return sum + (p.type === 'percent' ? premium * (val / 100) : val);
       }, 0);
 
+      const tpBonusDiff = GfcAdvancedEngine.calculateAttributedTPBonus(c, this.contracts, this.settings.joinDate, this.selectClubTier.value || 'club_350');
+
       const totalIncomeNet = (totalComm + totalPromoCalc) * (1 - 0.008);
       const totalExpense15 = premium * 15;
-      const netProfitAt16 = totalIncomeNet + surrender16 - totalExpense15;
+      const netProfitAt16 = totalIncomeNet + surrender16 - totalExpense15 + tpBonusDiff;
 
       return `
-        <div onclick="app.openSelfContractDetail('${c.id}')" class="p-3.5 bg-slate-50 rounded-xl border border-slate-200 text-xs space-y-2 cursor-pointer hover:border-emerald-500 transition group" title="클릭하여 상세 수지분석 보기">
-          <div class="flex justify-between items-start">
-            <span class="font-bold text-slate-800 flex items-center gap-1">${c.title} <i data-lucide="external-link" class="w-3 h-3 text-emerald-600 group-hover:scale-110 transition"></i></span>
-            <span class="px-2 py-0.5 bg-rose-100 text-rose-700 rounded text-[10px] font-bold">자기계약 수지분석</span>
-          </div>
-          
-          <div class="grid grid-cols-2 gap-2 pt-1 border-t border-slate-200/60 text-slate-600">
-            <div>
-              <span class="text-slate-400 block text-[10px]">15 회 총 납입지출</span>
-              <span class="font-bold text-slate-800">-${totalExpense15.toLocaleString()}원</span>
-            </div>
-            <div>
-              <span class="text-slate-400 block text-[10px]">수수료 + 시책 (공제후)</span>
-              <span class="font-bold text-emerald-600">+${Math.round(totalIncomeNet).toLocaleString()}원</span>
-            </div>
-            <div>
-              <span class="text-slate-400 block text-[10px]">16 회 해약환급금</span>
-              <span class="font-bold text-blue-600">+${surrender16.toLocaleString()}원</span>
-            </div>
-            <div>
-              <span class="text-slate-400 block text-[10px]">16 회 해지 시 최종순손익</span>
-              <span class="font-bold ${netProfitAt16 >= 0 ? 'text-emerald-600' : 'text-rose-600'}">
-                ${netProfitAt16 >= 0 ? '+' : ''}${Math.round(netProfitAt16).toLocaleString()}원
-              </span>
-            </div>
-          </div>
+        <div onclick="app.openSelfContractDetail('${c.id}')" class="p-3 bg-slate-50 rounded-xl border border-slate-200 text-xs cursor-pointer hover:border-emerald-500 transition group flex items-center justify-between gap-2" title="클릭하여 상세 수지분석 보기">
+          <span class="font-bold text-slate-800 flex items-center gap-1 truncate">
+            <i data-lucide="external-link" class="w-3 h-3 text-emerald-600 shrink-0 group-hover:scale-110 transition"></i>
+            <span class="truncate">${c.title}</span>
+          </span>
+          <span class="shrink-0 text-right">
+            <span class="text-slate-400 text-[10px] block">16회 해지 시 손익</span>
+            <span class="font-bold ${netProfitAt16 >= 0 ? 'text-emerald-600' : 'text-rose-600'}">
+              ${netProfitAt16 >= 0 ? '+' : ''}${Math.round(netProfitAt16).toLocaleString()}원
+            </span>
+          </span>
         </div>
       `;
     }).join('');
@@ -1500,7 +1515,8 @@ class AppUI {
     const deduction = Math.round(totalGross * 0.008);
     const totalIncomeNet = totalGross - deduction;
     const totalExpense15 = premium * 15;
-    const netProfitAt16 = totalIncomeNet + surrender16 - totalExpense15;
+    const tpBonusDiff = GfcAdvancedEngine.calculateAttributedTPBonus(c, this.contracts, this.settings.joinDate, this.selectClubTier.value || 'club_350');
+    const netProfitAt16 = totalIncomeNet + surrender16 - totalExpense15 + tpBonusDiff;
 
     let monthlyCommRows = feeRates.map((rate, idx) => {
       const combinedRate = GfcAdvancedEngine.getCombinedCommissionRate(c.productGroup, idx, feeRates);
@@ -1526,6 +1542,9 @@ class AppUI {
             <div>해약환급금(16 회차): <strong class="text-blue-600">+${surrender16.toLocaleString()}원</strong></div>
             <div>수수료 + 시책 (공제전): <strong class="text-emerald-600">+${Math.round(totalGross).toLocaleString()}원</strong></div>
             <div>고용보험공제 (0.8%): <strong class="text-rose-600">-${deduction.toLocaleString()}원</strong></div>
+            <div class="col-span-2">이 계약의 TP로 늘어난 신인/시니어 지원금: <strong class="text-emerald-600">+${Math.round(tpBonusDiff).toLocaleString()}원</strong>
+              <span class="text-rose-700/70 text-[10px] block">(등록월 신규TP 합계 기준 정착수수료/성과보너스/업적분/클럽분 증분 — 같은 달 다른 계약이 없으면 0)</span>
+            </div>
           </div>
           <div class="border-t border-rose-200 pt-2 flex justify-between text-sm font-extrabold">
             <span>16 회 해지 시 최종 순손익:</span>
