@@ -457,21 +457,21 @@ class GfcAdvancedEngine {
     return total;
   }
 
-  // 시책/프로모션 데이터 정규화: { name, payouts:[{type,value,afterPaymentMonth}, ...] } 형태로 통일.
+  // 프로모션 데이터 정규화: { name, payouts:[{type,value,afterPaymentMonth}, ...] } 형태로 통일.
   // 구버전 데이터({type,value,afterPaymentMonth}가 최상위에 바로 있는 형태)도 그대로 지원한다.
   static normalizePromotions(promotions) {
     if (!Array.isArray(promotions)) return [];
     return promotions.map((p, idx) => {
       if (p && Array.isArray(p.payouts)) {
-        return { name: p.name || `시책 ${idx + 1}`, payouts: p.payouts };
+        return { name: p.name || `프로모션 ${idx + 1}`, payouts: p.payouts };
       }
-      return { name: (p && p.name) || `시책 ${idx + 1}`, payouts: [{ type: p.type, value: p.value, afterPaymentMonth: p.afterPaymentMonth }] };
+      return { name: (p && p.name) || `프로모션 ${idx + 1}`, payouts: [{ type: p.type, value: p.value, afterPaymentMonth: p.afterPaymentMonth }] };
     });
   }
 
-  // 계산에는 그룹명이 필요 없으므로, 모든 시책 그룹의 payouts만 하나의 배열로 평탄화
+  // 계산에는 그룹명이 필요 없으므로, 모든 프로모션 그룹의 payouts만 하나의 배열로 평탄화
   static flattenPromotionPayouts(promotions) {
-    return this.normalizePromotions(promotions).flatMap(g => g.payouts);
+    return this.normalizePromotions(promotions).flatMap(g => g.payouts.map(p => ({ ...p, groupName: g.name })));
   }
 
   // 특정 계약(c)의 TP가 그 달 신규TP 합계에 더해짐으로써 늘어난 신인/시니어 지원금 증분을 계산.
@@ -541,7 +541,7 @@ class GfcAdvancedEngine {
       const isTerminatedBeforeThisMonth = (status === '해지' || status === '실효') && (elapsedMonths >= terminationMonth);
       const isTerminatedThisMonth = (status === '해지' || status === '실효') && (elapsedMonths === terminationMonth);
 
-      // 수수료는 "납입 시점"이 아니라 "납입 다음 달"에 지급된다 (규정집 시책 문구 "N회차 납입 후 익월 지급"과 동일한 원리).
+      // 수수료는 "납입 시점"이 아니라 "납입 다음 달"에 지급된다 (규정집 프로모션 문구 "N회차 납입 후 익월 지급"과 동일한 원리).
       // 그래서 계약 시작월(elapsedMonths=0)에는 아직 지급될 수수료가 없고, 실제로는 1회차 납입분 수수료가
       // 다음 달(elapsedMonths=1)에 들어온다. incomeRoundIndex는 "이번 달에 지급되는 수수료가 몇 회차 납입분인지"를
       // feeRates 배열 인덱스(0-based)로 나타낸다.
@@ -554,9 +554,9 @@ class GfcAdvancedEngine {
         commissionIncome = tp * (rate / 100);
       }
 
-      // 시책도 "N회차 납입 후 익월 지급"이므로, 지급월(targetDepositMonth) 시점이 아니라 그 시책의
+      // 프로모션도 "N회차 납입 후 익월 지급"이므로, 지급월(targetDepositMonth) 시점이 아니라 그 프로모션의
       // 근거가 된 납입회차(targetDepositMonth-1)가 실제로 해지 전에 납입되었는지로 게이팅해야 정확하다.
-      // (기존엔 지급월 자체가 해지월 이후인지만 봐서, "해지 직전 회차 납입 후 익월 지급"인 시책이
+      // (기존엔 지급월 자체가 해지월 이후인지만 봐서, "해지 직전 회차 납입 후 익월 지급"인 프로모션이
       //  지급월이 하필 해지월과 같거나 그 이후로 계산되면 정상 지급분까지 누락되는 경우가 있었음)
       promotionPayouts.forEach(promo => {
         const targetDepositMonth = Number(promo.afterPaymentMonth) || 1;
@@ -572,10 +572,11 @@ class GfcAdvancedEngine {
       });
 
       if (isTerminatedThisMonth) {
-        // (1) 시책 환수: 25차월 이내 해지 시 기지급 시책의 70% 환수
+        // (1) 프로모션 환수: '건강상해보너스'라는 이름의 프로모션에 한해, 25차월 이내 해지 시 기지급액의 70% 환수
         if (terminationMonth < 25) {
           let totalPromoReceived = 0;
           promotionPayouts.forEach(promo => {
+            if ((promo.groupName || '').trim() !== '건강상해보너스') return;
             const targetDepositMonth = Number(promo.afterPaymentMonth) || 1;
             if (targetDepositMonth <= terminationMonth) {
               let pVal = Number(promo.value) || 0;
@@ -1055,7 +1056,7 @@ class AppUI {
           </td>
           <td class="py-3 px-4 text-right font-bold text-emerald-600">
             +${Math.round(totalPromoCalc).toLocaleString()}원
-            <div class="text-[10px] font-normal text-slate-400">${promoGroupCount}개 시책</div>
+            <div class="text-[10px] font-normal text-slate-400">${promoGroupCount}개 프로모션</div>
           </td>
           <td class="py-3 px-4 text-slate-600 whitespace-nowrap">
             <div class="font-medium text-amber-700">${surrender16 > 0 ? surrender16.toLocaleString() + '원' : '미입력'}</div>
@@ -1183,7 +1184,7 @@ class AppUI {
       }
     ] : [
       {
-        label: '진성 + 성과보너스 + 시책 수입 (공제후)',
+        label: '진성 + 성과보너스 + 프로모션 수입 (공제후)',
         data: realIncomes,
         backgroundColor: '#059669',
         borderRadius: 4,
@@ -1271,7 +1272,7 @@ class AppUI {
     const aggregated = GfcAdvancedEngine.calculateAggregatedCashflow(this.contracts, totalHorizon, this.settings.joinDate, clubKey, false, baseDate);
 
     const titleMap = {
-      income: '당월 총수입 (수수료+시책+보너스) 상세 내역',
+      income: '당월 총수입 (수수료+프로모션+보너스) 상세 내역',
       expense: '당월 자기계약 보험료 지출 상세 내역',
       net: '당월 최종 순손익 산출 내역'
     };
@@ -1302,7 +1303,7 @@ class AppUI {
         });
       }
 
-      // 당월 수수료·시책이 발생하는 계약들의 TP 합계 (1~60회차 진행 중인 전체 계약, 표시용)
+      // 당월 수수료·프로모션이 발생하는 계약들의 TP 합계 (1~60회차 진행 중인 전체 계약, 표시용)
       // 수수료는 납입 다음 달에 지급되므로, "이번 달에 지급되는 수수료"는 전월(elapsed-1) 납입분 기준이다.
       let totalTP = 0;
       let contractRows = this.contracts.map(c => {
@@ -1320,7 +1321,7 @@ class AppUI {
 
         totalTP += tp;
 
-        // 실제 KPI/차트 집계와 완전히 동일한 엔진 함수를 그대로 재사용 (수수료/시책 시점 계산 이중 구현 방지)
+        // 실제 KPI/차트 집계와 완전히 동일한 엔진 함수를 그대로 재사용 (수수료/프로모션 시점 계산 이중 구현 방지)
         const contractSchedule = GfcAdvancedEngine.calculateMonthlySchedule(c, mIdx + 1, this.settings.joinDate, baseDate);
         const monthData = contractSchedule[mIdx] || { commissionIncome: 0, promoIncome: 0 };
         const comm = monthData.commissionIncome;
@@ -1334,7 +1335,7 @@ class AppUI {
             </div>
             <div class="text-[11px] text-slate-500 flex justify-between">
               <span>${incomeRoundIndex + 1}회차 납입분 수수료 지급 (수수료율 ${rate}%) | TP: ${tp.toLocaleString()}원</span>
-              <span>수수료: ${Math.round(comm).toLocaleString()}원 / 시책: ${Math.round(promo).toLocaleString()}원</span>
+              <span>수수료: ${Math.round(comm).toLocaleString()}원 / 프로모션: ${Math.round(promo).toLocaleString()}원</span>
             </div>
           </div>
         `;
@@ -1434,7 +1435,7 @@ class AppUI {
       const incomeSection = `
         ${bonusBreakdown}
         <div>
-          <h4 class="font-bold text-slate-800 mb-2 text-xs">해당 월 계약별 수수료 및 시책 상세 (수수료 발생 계약 TP 합계: ${totalTP.toLocaleString()}원)</h4>
+          <h4 class="font-bold text-slate-800 mb-2 text-xs">해당 월 계약별 수수료 및 프로모션 상세 (수수료 발생 계약 TP 합계: ${totalTP.toLocaleString()}원)</h4>
           <div class="space-y-2 max-h-[220px] overflow-y-auto custom-scrollbar">
             ${contractRows || '<p class="text-slate-400 text-center py-4">해당 월에 실적이 발생하는 정상유지 계약이 없습니다.</p>'}
           </div>
@@ -1531,7 +1532,7 @@ class AppUI {
       let val = Number(p.value) || 0;
       let earned = p.type === 'percent' ? premium * (val / 100) : val;
       return `<div class="flex justify-between py-1 border-b border-slate-100"><span>${p.name} (${p.afterPaymentMonth}회차 납입 후 익월):</span> <strong class="text-emerald-600">+${Math.round(earned).toLocaleString()}원</strong></div>`;
-    }).join('') || '<p class="text-slate-400">적용된 시책이 없습니다.</p>';
+    }).join('') || '<p class="text-slate-400">적용된 프로모션이 없습니다.</p>';
 
     let htmlContent = `
       <div class="space-y-4">
@@ -1540,7 +1541,7 @@ class AppUI {
           <div class="grid grid-cols-2 gap-2 text-xs">
             <div>15 회 총 납입지출: <strong class="text-rose-600">-${totalExpense15.toLocaleString()}원</strong></div>
             <div>해약환급금(16 회차): <strong class="text-blue-600">+${surrender16.toLocaleString()}원</strong></div>
-            <div>수수료 + 시책 (공제전): <strong class="text-emerald-600">+${Math.round(totalGross).toLocaleString()}원</strong></div>
+            <div>수수료 + 프로모션 (공제전): <strong class="text-emerald-600">+${Math.round(totalGross).toLocaleString()}원</strong></div>
             <div>고용보험공제 (0.8%): <strong class="text-rose-600">-${deduction.toLocaleString()}원</strong></div>
             <div class="col-span-2">이 계약의 TP로 늘어난 신인/시니어 지원금: <strong class="text-emerald-600">+${Math.round(tpBonusDiff).toLocaleString()}원</strong>
               <span class="text-rose-700/70 text-[10px] block">(등록월 신규TP 합계 기준 정착수수료/성과보너스/업적분/클럽분 증분 — 같은 달 다른 계약이 없으면 0)</span>
@@ -1560,7 +1561,7 @@ class AppUI {
         </div>
 
         <div>
-          <h4 class="font-bold text-slate-800 mb-2">적용된 시책 상세</h4>
+          <h4 class="font-bold text-slate-800 mb-2">적용된 프로모션 상세</h4>
           <div class="space-y-1 max-h-[120px] overflow-y-auto custom-scrollbar text-xs bg-slate-50 p-3 rounded-xl border border-slate-200">
             ${promoRows}
           </div>
@@ -1579,8 +1580,8 @@ class AppUI {
     div.className = 'promo-group bg-white rounded-lg border border-emerald-200 p-2.5 space-y-2';
     div.innerHTML = `
       <div class="flex items-center gap-2">
-        <input type="text" class="promo-name flex-1 px-2 py-1.5 bg-slate-50 border border-slate-300 rounded text-xs font-semibold focus:ring-2 focus:ring-emerald-500 focus:outline-none" placeholder="시책/프로모션 명칭 (예: 변액전환 시책)">
-        <button type="button" class="btn-remove-promo-group text-rose-500 hover:text-rose-700 p-1" title="이 시책 전체 삭제">
+        <input type="text" class="promo-name flex-1 px-2 py-1.5 bg-slate-50 border border-slate-300 rounded text-xs font-semibold focus:ring-2 focus:ring-emerald-500 focus:outline-none" placeholder="프로모션 명칭 (예: 변액전환 프로모션)">
+        <button type="button" class="btn-remove-promo-group text-rose-500 hover:text-rose-700 p-1" title="이 프로모션 전체 삭제">
           <i data-lucide="trash-2" class="w-4 h-4"></i>
         </button>
       </div>
@@ -1627,7 +1628,7 @@ class AppUI {
       if (payoutsContainer.querySelectorAll('.promo-payout-row').length > 1) {
         row.remove();
       } else {
-        alert('시책 하나에는 최소 1개의 지급 회차가 있어야 합니다. 전체 삭제하려면 시책 카드의 휴지통 버튼을 사용하세요.');
+        alert('프로모션 하나에는 최소 1개의 지급 회차가 있어야 합니다. 전체 삭제하려면 프로모션 카드의 휴지통 버튼을 사용하세요.');
       }
     });
     lucide.createIcons();
@@ -1714,7 +1715,7 @@ class AppUI {
         });
       });
       if (payouts.length > 0) {
-        promotions.push({ name: name || '시책', payouts });
+        promotions.push({ name: name || '프로모션', payouts });
       }
     });
 
