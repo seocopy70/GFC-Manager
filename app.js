@@ -502,6 +502,22 @@ class GfcAdvancedEngine {
     return Math.max(0, bonusWith - bonusWithout);
   }
 
+  // 16회차 해지(=15회 납입 후 해지, 25차월 미도달) 시나리오 전용: 그때까지 지급된
+  // '건강상해보너스' 프로모션 전액에 70% 환수를 적용한 금액을 계산
+  static calculateHealthBonusClawback(contract, uptoRound = 15) {
+    const premium = Number(contract.premium) || 0;
+    let total = 0;
+    this.flattenPromotionPayouts(contract.promotions).forEach(p => {
+      if ((p.groupName || '').trim() !== '건강상해보너스') return;
+      const round = Number(p.afterPaymentMonth) || 1;
+      if (round <= uptoRound) {
+        const val = Number(p.value) || 0;
+        total += (p.type === 'percent' ? premium * (val / 100) : val);
+      }
+    });
+    return Math.round(total * 0.70);
+  }
+
   static getFeeSchedule(productGroup, isSenior = false) {
     if (!isSenior) {
       if (productGroup === '종신/GI 보험') return [112, 8,8,8,8,8,8,8,8,8,8,8, 20,20, 12];
@@ -1110,7 +1126,8 @@ class AppUI {
 
       const totalIncomeNet = (totalComm + totalPromoCalc) * (1 - 0.008);
       const totalExpense15 = premium * 15;
-      const netProfitAt16 = totalIncomeNet + surrender16 - totalExpense15 + tpBonusDiff;
+      const healthBonusClawback = GfcAdvancedEngine.calculateHealthBonusClawback(c, 15);
+      const netProfitAt16 = totalIncomeNet + surrender16 - totalExpense15 + tpBonusDiff - healthBonusClawback;
 
       return `
         <div onclick="app.openSelfContractDetail('${c.id}')" class="p-3 bg-slate-50 rounded-xl border border-slate-200 text-xs cursor-pointer hover:border-emerald-500 transition group flex items-center justify-between gap-2" title="클릭하여 상세 수지분석 보기">
@@ -1517,7 +1534,8 @@ class AppUI {
     const totalIncomeNet = totalGross - deduction;
     const totalExpense15 = premium * 15;
     const tpBonusDiff = GfcAdvancedEngine.calculateAttributedTPBonus(c, this.contracts, this.settings.joinDate, this.selectClubTier.value || 'club_350');
-    const netProfitAt16 = totalIncomeNet + surrender16 - totalExpense15 + tpBonusDiff;
+    const healthBonusClawback = GfcAdvancedEngine.calculateHealthBonusClawback(c, 15);
+    const netProfitAt16 = totalIncomeNet + surrender16 - totalExpense15 + tpBonusDiff - healthBonusClawback;
 
     let monthlyCommRows = feeRates.map((rate, idx) => {
       const combinedRate = GfcAdvancedEngine.getCombinedCommissionRate(c.productGroup, idx, feeRates);
@@ -1546,6 +1564,9 @@ class AppUI {
             <div class="col-span-2">이 계약의 TP로 늘어난 신인/시니어 지원금: <strong class="text-emerald-600">+${Math.round(tpBonusDiff).toLocaleString()}원</strong>
               <span class="text-rose-700/70 text-[10px] block">(등록월 신규TP 합계 기준 정착수수료/성과보너스/업적분/클럽분 증분 — 같은 달 다른 계약이 없으면 0)</span>
             </div>
+            ${healthBonusClawback > 0 ? `
+            <div class="col-span-2">건강상해보너스 환수 (25차월 미도달, 70%): <strong class="text-rose-600">-${healthBonusClawback.toLocaleString()}원</strong></div>
+            ` : ''}
           </div>
           <div class="border-t border-rose-200 pt-2 flex justify-between text-sm font-extrabold">
             <span>16 회 해지 시 최종 순손익:</span>
