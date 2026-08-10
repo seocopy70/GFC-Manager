@@ -37,8 +37,16 @@ class ContractStore {
 
   // 인증 상태 관리
   static async checkAuth() {
-    const { data: { user } } = await window.supabase.auth.getUser();
-    return user;
+    try {
+      const { data, error } = await window.supabase.auth.getUser();
+      // persistSession:false 설정에서는 페이지를 열 때마다 저장된 세션이 없는 상태로 시작하는데,
+      // 이 경우 Supabase가 "Auth session missing" 오류를 반환하는 게 알려진 정상 동작이다.
+      // 이건 실제 오류가 아니라 "아직 로그인 안 한 상태"이므로 조용히 null(로그아웃 상태)로 처리한다.
+      if (error) return null;
+      return data ? data.user : null;
+    } catch (e) {
+      return null;
+    }
   }
 
   static async login(email, password) {
@@ -985,6 +993,7 @@ class AppUI {
       const tp = Number(c.tp) || 0;
       const surrender16 = Number(c.surrenderValue16) || 0;
 
+      const promoGroupCount = GfcAdvancedEngine.normalizePromotions(c.promotions).length;
       const totalPromoCalc = GfcAdvancedEngine.flattenPromotionPayouts(c.promotions).reduce((sum, p) => {
         const val = Number(p.value) || 0;
         return sum + (p.type === 'percent' ? premium * (val / 100) : val);
@@ -1018,7 +1027,7 @@ class AppUI {
           </td>
           <td class="py-3 px-4 text-right font-bold text-emerald-600">
             +${Math.round(totalPromoCalc).toLocaleString()}원
-            <div class="text-[10px] font-normal text-slate-400">${promotions.length}개 시책</div>
+            <div class="text-[10px] font-normal text-slate-400">${promoGroupCount}개 시책</div>
           </td>
           <td class="py-3 px-4 text-slate-600 whitespace-nowrap">
             <div class="font-medium text-amber-700">${surrender16 > 0 ? surrender16.toLocaleString() + '원' : '미입력'}</div>
