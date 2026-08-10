@@ -1135,11 +1135,8 @@ class AppUI {
             <i data-lucide="external-link" class="w-3 h-3 text-emerald-600 shrink-0 group-hover:scale-110 transition"></i>
             <span class="truncate">${c.title}</span>
           </span>
-          <span class="shrink-0 text-right">
-            <span class="text-slate-400 text-[10px] block">16회 해지 시 손익</span>
-            <span class="font-bold ${netProfitAt16 >= 0 ? 'text-emerald-600' : 'text-rose-600'}">
-              ${netProfitAt16 >= 0 ? '+' : ''}${Math.round(netProfitAt16).toLocaleString()}원
-            </span>
+          <span class="shrink-0 font-bold ${netProfitAt16 >= 0 ? 'text-emerald-600' : 'text-rose-600'}">
+            ${netProfitAt16 >= 0 ? '+' : ''}${Math.round(netProfitAt16).toLocaleString()}원
           </span>
         </div>
       `;
@@ -1432,7 +1429,30 @@ class AppUI {
         </div>
       `;
 
-      const summaryBoxes = `
+      // 순손익(net) 상세창 전용: 첫 등록월부터 선택월까지의 누적 수입/지출/순손익
+      let cumIncome = 0, cumExpense = 0, cumNet = 0;
+      for (let i = 0; i <= mIdx; i++) {
+        cumIncome += aggregated[i].totalIncome;
+        cumExpense += aggregated[i].selfExpense;
+        cumNet += aggregated[i].netProfit;
+      }
+
+      const summaryBoxes = type === 'net' ? `
+        <div class="grid grid-cols-3 gap-2 text-center">
+          <div class="p-3 rounded-xl border bg-emerald-50 border-emerald-200">
+            <span class="text-[10px] text-slate-500 block">누적 총수입</span>
+            <strong class="text-emerald-700 text-sm">+${cumIncome.toLocaleString()}원</strong>
+          </div>
+          <div class="p-3 rounded-xl border bg-rose-50 border-rose-200">
+            <span class="text-[10px] text-slate-500 block">누적 자기계약 보험료지출</span>
+            <strong class="text-rose-600 text-sm">-${cumExpense.toLocaleString()}원</strong>
+          </div>
+          <div class="p-3 rounded-xl border bg-blue-100 border-blue-400 ring-2 ring-blue-400">
+            <span class="text-[10px] text-slate-500 block">누적 순손익</span>
+            <strong class="text-blue-700 text-sm">${cumNet >= 0 ? '+' : ''}${cumNet.toLocaleString()}원</strong>
+          </div>
+        </div>
+      ` : `
         <div class="grid grid-cols-3 gap-2 text-center">
           <div class="p-3 rounded-xl border ${type === 'income' ? 'bg-emerald-100 border-emerald-400 ring-2 ring-emerald-400' : 'bg-emerald-50 border-emerald-200'}">
             <span class="text-[10px] text-slate-500 block">당월 총수입</span>
@@ -1442,8 +1462,8 @@ class AppUI {
             <span class="text-[10px] text-slate-500 block">자기계약 보험료지출</span>
             <strong class="text-rose-600 text-sm">-${item.selfExpense.toLocaleString()}원</strong>
           </div>
-          <div class="p-3 rounded-xl border ${type === 'net' ? 'bg-blue-100 border-blue-400 ring-2 ring-blue-400' : 'bg-blue-50 border-blue-200'}">
-            <span class="text-[10px] text-slate-500 block">최종 순손익</span>
+          <div class="p-3 rounded-xl border bg-blue-50 border-blue-200">
+            <span class="text-[10px] text-slate-500 block">당월 순손익</span>
             <strong class="text-blue-700 text-sm">${item.netProfit >= 0 ? '+' : ''}${item.netProfit.toLocaleString()}원</strong>
           </div>
         </div>
@@ -1468,10 +1488,85 @@ class AppUI {
         </div>
       `;
 
-      const netExplainer = `
-        <div class="p-3.5 bg-blue-50 rounded-xl border border-blue-200 text-xs text-blue-900">
-          <p class="font-bold text-sm mb-1">🧮 순손익 산출 방식</p>
-          <p>당월 총수입 <strong class="text-emerald-700">+${item.totalIncome.toLocaleString()}원</strong> − 자기계약 보험료 지출 <strong class="text-rose-600">-${item.selfExpense.toLocaleString()}원</strong> = 최종 순손익 <strong class="${item.netProfit >= 0 ? 'text-emerald-700' : 'text-rose-600'}">${item.netProfit >= 0 ? '+' : ''}${item.netProfit.toLocaleString()}원</strong></p>
+      // 순손익(net) 상세창 전용: 첫 등록월부터 선택월까지 계약별 누적 수입/지출 상세
+      let cumTotalTP = 0;
+      let cumContractRows = this.contracts.map(c => {
+        const schedule = GfcAdvancedEngine.calculateMonthlySchedule(c, mIdx + 1, this.settings.joinDate, baseDate);
+        let sumComm = 0, sumPromo = 0;
+        for (let i = 0; i <= mIdx; i++) {
+          const d = schedule[i];
+          if (!d) continue;
+          sumComm += d.commissionIncome;
+          sumPromo += d.promoIncome;
+        }
+        if (sumComm + sumPromo <= 0) return '';
+        cumTotalTP += Number(c.tp) || 0;
+        return `
+          <div class="p-3 bg-white rounded-xl border border-slate-200 text-xs flex justify-between items-center">
+            <span class="font-bold text-slate-800">${c.title} (${c.client}) - [${c.contractType}]</span>
+            <span class="text-emerald-600 font-bold">+${Math.round(sumComm + sumPromo).toLocaleString()}원</span>
+          </div>
+        `;
+      }).filter(Boolean).join('');
+
+      // 누적 신인/시니어 지원금 (월별 지원금만 별도 합산 — calculateAggregatedCashflow와 동일 산식)
+      let cumPlannerBonus = 0;
+      for (let i = 0; i <= mIdx; i++) {
+        const d = new Date(baseDate.getFullYear(), baseDate.getMonth() + i, 1);
+        const prodD = new Date(d.getFullYear(), d.getMonth() - 1, 1);
+        const prodBeforeJoin = prodD.getFullYear() < joinY || (prodD.getFullYear() === joinY && prodD.getMonth() < (joinM - 1));
+        const tM = prodBeforeJoin ? 0 : GfcAdvancedEngine.calculateTenureMonth(this.settings.joinDate, prodD);
+        let mTP = 0;
+        if (!prodBeforeJoin) {
+          this.contracts.forEach(c => {
+            if (c.status !== '정상유지') return;
+            const sd = new Date(c.startDate);
+            if (sd.getFullYear() === prodD.getFullYear() && sd.getMonth() === prodD.getMonth()) mTP += (Number(c.tp) || 0);
+          });
+        }
+        let pb = 0;
+        if (!prodBeforeJoin) {
+          pb = tM <= 24 ? GfcAdvancedEngine.getNewPlannerSupport(tM, mTP) : GfcAdvancedEngine.calculateSeniorPerformanceBonus(mTP, clubKey);
+          pb += GfcAdvancedEngine.calculateRetentionBonus(this.contracts, this.settings.joinDate, prodD);
+          pb -= GfcAdvancedEngine.calculateNewPlannerBonusClawback(this.contracts, this.settings.joinDate, d);
+        }
+        if (d.getFullYear() === joinY && d.getMonth() === (joinM - 1)) pb += 800000;
+        cumPlannerBonus += pb;
+      }
+
+      let cumSelfExpenseRows = this.contracts.map(c => {
+        if (c.contractType !== '자기계약') return '';
+        const schedule = GfcAdvancedEngine.calculateMonthlySchedule(c, mIdx + 1, this.settings.joinDate, baseDate);
+        let sumExp = 0;
+        for (let i = 0; i <= mIdx; i++) sumExp += (schedule[i] ? schedule[i].premiumExpense : 0);
+        if (sumExp <= 0) return '';
+        return `
+          <div class="p-3 bg-white rounded-xl border border-slate-200 text-xs flex justify-between items-center">
+            <strong>${c.title} (${c.client})</strong>
+            <strong class="text-rose-600">-${Math.round(sumExp).toLocaleString()}원</strong>
+          </div>
+        `;
+      }).filter(Boolean).join('');
+
+      const cumIncomeSection = `
+        <div class="p-3.5 bg-emerald-50 rounded-xl border border-emerald-200 text-xs text-emerald-900">
+          <p class="font-bold text-sm">✨ 누적 신인/시니어 지원금 (등록월~선택월)</p>
+          <div class="flex justify-between pt-1"><span>지원금 합계:</span> <strong>+${Math.round(cumPlannerBonus).toLocaleString()}원</strong></div>
+        </div>
+        <div>
+          <h4 class="font-bold text-slate-800 mb-2 text-xs">계약별 누적 수수료 및 프로모션 상세 (등록월~선택월, 관련 계약 TP 합계: ${cumTotalTP.toLocaleString()}원)</h4>
+          <div class="space-y-2 max-h-[220px] overflow-y-auto custom-scrollbar">
+            ${cumContractRows || '<p class="text-slate-400 text-center py-4">누적 실적이 있는 계약이 없습니다.</p>'}
+          </div>
+        </div>
+      `;
+
+      const cumExpenseSection = `
+        <div>
+          <h4 class="font-bold text-slate-800 mb-2 text-xs">계약별 누적 자기계약 보험료 지출 상세 (등록월~선택월)</h4>
+          <div class="space-y-2 max-h-[220px] overflow-y-auto custom-scrollbar">
+            ${cumSelfExpenseRows || '<p class="text-slate-400 text-center py-4">지출 중인 자기계약이 없습니다.</p>'}
+          </div>
         </div>
       `;
 
@@ -1481,8 +1576,8 @@ class AppUI {
       } else if (type === 'expense') {
         bodySections = expenseSection;
       } else {
-        // 순손익: 계산식 + 수입/지출 상세를 모두 보여줌
-        bodySections = `${netExplainer}${incomeSection}${expenseSection}`;
+        // 순손익: 당월이 아니라 첫 등록월부터 선택월까지의 누적 수입/지출 상세를 보여줌
+        bodySections = `${cumIncomeSection}${cumExpenseSection}`;
       }
 
       return `
@@ -1561,9 +1656,7 @@ class AppUI {
             <div>해약환급금(16 회차): <strong class="text-blue-600">+${surrender16.toLocaleString()}원</strong></div>
             <div>수수료 + 프로모션 (공제전): <strong class="text-emerald-600">+${Math.round(totalGross).toLocaleString()}원</strong></div>
             <div>고용보험공제 (0.8%): <strong class="text-rose-600">-${deduction.toLocaleString()}원</strong></div>
-            <div class="col-span-2">이 계약의 TP로 늘어난 신인/시니어 지원금: <strong class="text-emerald-600">+${Math.round(tpBonusDiff).toLocaleString()}원</strong>
-              <span class="text-rose-700/70 text-[10px] block">(등록월 신규TP 합계 기준 정착수수료/성과보너스/업적분/클럽분 증분 — 같은 달 다른 계약이 없으면 0)</span>
-            </div>
+            <div class="col-span-2">이 계약의 TP로 늘어난 신인/시니어 지원금: <strong class="text-emerald-600">+${Math.round(tpBonusDiff).toLocaleString()}원</strong></div>
             ${healthBonusClawback > 0 ? `
             <div class="col-span-2">건강상해보너스 환수 (25차월 미도달, 70%): <strong class="text-rose-600">-${healthBonusClawback.toLocaleString()}원</strong></div>
             ` : ''}
