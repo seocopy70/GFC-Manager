@@ -1515,18 +1515,18 @@ class AppUI {
           </div>
           <div class="p-3 rounded-xl border bg-blue-100 border-blue-400 ring-2 ring-blue-400">
             <span class="text-[10px] text-slate-500 block">누적 순손익</span>
-            <strong class="text-blue-700 text-sm">${cumNet >= 0 ? '+' : ''}${cumNet.toLocaleString()}원</strong>
+            <strong class="text-blue-700 text-lg font-extrabold">${cumNet >= 0 ? '+' : ''}${cumNet.toLocaleString()}원</strong>
           </div>
         </div>
       ` : `
         <div class="grid grid-cols-3 gap-2 text-center">
           <div class="p-3 rounded-xl border ${type === 'income' ? 'bg-emerald-100 border-emerald-400 ring-2 ring-emerald-400' : 'bg-emerald-50 border-emerald-200'}">
             <span class="text-[10px] text-slate-500 block">당월 총수입</span>
-            <strong class="text-emerald-700 text-sm">+${item.totalIncome.toLocaleString()}원</strong>
+            <strong class="text-emerald-700 ${type === 'income' ? 'text-lg font-extrabold' : 'text-sm'}">+${item.totalIncome.toLocaleString()}원</strong>
           </div>
           <div class="p-3 rounded-xl border ${type === 'expense' ? 'bg-rose-100 border-rose-400 ring-2 ring-rose-400' : 'bg-rose-50 border-rose-200'}">
             <span class="text-[10px] text-slate-500 block">자기계약 보험료지출</span>
-            <strong class="text-rose-600 text-sm">-${item.selfExpense.toLocaleString()}원</strong>
+            <strong class="text-rose-600 ${type === 'expense' ? 'text-lg font-extrabold' : 'text-sm'}">-${item.selfExpense.toLocaleString()}원</strong>
           </div>
           <div class="p-3 rounded-xl border bg-blue-50 border-blue-200">
             <span class="text-[10px] text-slate-500 block">당월 순손익</span>
@@ -1743,9 +1743,9 @@ class AppUI {
             <div class="col-span-2">건강상해보너스 환수 (25차월 미도달, 70%): <strong class="text-rose-600">-${healthBonusClawback.toLocaleString()}원</strong></div>
             ` : ''}
           </div>
-          <div class="border-t border-rose-200 pt-2 flex justify-between text-sm font-extrabold">
-            <span>16 회 해지 시 최종 순손익:</span>
-            <span class="${netProfitAt16 >= 0 ? 'text-emerald-600' : 'text-rose-600'}">${netProfitAt16 >= 0 ? '+' : ''}${Math.round(netProfitAt16).toLocaleString()}원</span>
+          <div class="border-t border-rose-200 pt-2 flex justify-between items-center">
+            <span class="text-sm font-bold">16 회 해지 시 최종 순손익:</span>
+            <span class="text-xl font-extrabold ${netProfitAt16 >= 0 ? 'text-emerald-600' : 'text-rose-600'}">${netProfitAt16 >= 0 ? '+' : ''}${Math.round(netProfitAt16).toLocaleString()}원</span>
           </div>
         </div>
 
