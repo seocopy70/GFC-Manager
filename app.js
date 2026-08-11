@@ -49,6 +49,35 @@ class ContractStore {
     }
   }
 
+  // 아이디(이메일 @ 앞부분)만으로 전체 이메일을 찾기 위한 조회 (user_lookup 테이블, 비로그인 상태에서도 조회 가능해야 함)
+  static async lookupEmailByUsername(username) {
+    if (!window.supabase || !username) return null;
+    try {
+      const { data, error } = await window.supabase
+        .from('user_lookup')
+        .select('email')
+        .eq('username', username)
+        .maybeSingle();
+      if (error || !data) return null;
+      return data.email;
+    } catch (e) {
+      return null; // user_lookup 테이블이 아직 없는 경우 등 — 조용히 실패 처리
+    }
+  }
+
+  // 로그인 성공 시 아이디→이메일 매핑을 자동으로 등록/갱신 (다음부터 아이디만으로 로그인 가능하게)
+  static async registerUsernameLookup(user) {
+    if (!window.supabase || !user || !user.email) return;
+    const username = user.email.split('@')[0];
+    try {
+      await window.supabase
+        .from('user_lookup')
+        .upsert({ username, email: user.email, user_id: user.id });
+    } catch (e) {
+      console.error('아이디 조회용 정보 등록 실패 (user_lookup 테이블이 없을 수 있음):', e);
+    }
+  }
+
   static async login(email, password) {
     if (!email || !password) {
       throw new Error('이메일과 비밀번호를 모두 입력해주세요.');
@@ -948,9 +977,15 @@ class AppUI {
     let email = this.loginEmail.value.trim();
     const password = this.loginPassword.value;
 
-    // '@' 없이 아이디만 입력한 경우, config.js의 AUTO_LOGIN_EMAIL_DOMAIN을 자동으로 붙임
-    if (email && !email.includes('@') && typeof AUTO_LOGIN_EMAIL_DOMAIN === 'string' && AUTO_LOGIN_EMAIL_DOMAIN) {
-      email = `${email}@${AUTO_LOGIN_EMAIL_DOMAIN}`;
+    // '@' 없이 아이디만 입력한 경우: 1순위 Supabase(user_lookup 테이블)에서 등록된 이메일 조회,
+    // 실패 시 config.js의 AUTO_LOGIN_EMAIL_DOMAIN으로 폴백
+    if (email && !email.includes('@') && !this.isSignupMode) {
+      const found = await ContractStore.lookupEmailByUsername(email);
+      if (found) {
+        email = found;
+      } else if (typeof AUTO_LOGIN_EMAIL_DOMAIN === 'string' && AUTO_LOGIN_EMAIL_DOMAIN) {
+        email = `${email}@${AUTO_LOGIN_EMAIL_DOMAIN}`;
+      }
     }
 
     this.btnLogin.disabled = true;
@@ -961,6 +996,7 @@ class AppUI {
         this.toggleSignupMode();
       } else {
         const { user } = await ContractStore.login(email, password);
+        await ContractStore.registerUsernameLookup(user);
         await this.enterApp(user);
       }
     } catch (e) {
