@@ -945,8 +945,13 @@ class AppUI {
   }
 
   async handleLoginOrSignup() {
-    const email = this.loginEmail.value.trim();
+    let email = this.loginEmail.value.trim();
     const password = this.loginPassword.value;
+
+    // '@' 없이 아이디만 입력한 경우, config.js의 AUTO_LOGIN_EMAIL_DOMAIN을 자동으로 붙임
+    if (email && !email.includes('@') && typeof AUTO_LOGIN_EMAIL_DOMAIN === 'string' && AUTO_LOGIN_EMAIL_DOMAIN) {
+      email = `${email}@${AUTO_LOGIN_EMAIL_DOMAIN}`;
+    }
 
     this.btnLogin.disabled = true;
     try {
@@ -1130,12 +1135,12 @@ class AppUI {
       const netProfitAt16 = totalIncomeNet + surrender16 - totalExpense15 + tpBonusDiff - healthBonusClawback;
 
       return `
-        <div onclick="app.openSelfContractDetail('${c.id}')" class="p-3 bg-slate-50 rounded-xl border border-slate-200 text-xs cursor-pointer hover:border-emerald-500 transition group flex items-center justify-between gap-2" title="클릭하여 상세 수지분석 보기">
-          <span class="font-bold text-slate-800 flex items-center gap-1 truncate">
-            <i data-lucide="external-link" class="w-3 h-3 text-emerald-600 shrink-0 group-hover:scale-110 transition"></i>
+        <div onclick="app.openSelfContractDetail('${c.id}')" class="p-5 bg-slate-50 rounded-xl border border-slate-200 text-sm cursor-pointer hover:border-emerald-500 hover:shadow-md transition group flex items-center justify-between gap-3" title="클릭하여 상세 수지분석 보기">
+          <span class="font-bold text-slate-800 flex items-center gap-1.5 truncate text-base">
+            <i data-lucide="external-link" class="w-4 h-4 text-emerald-600 shrink-0 group-hover:scale-110 transition"></i>
             <span class="truncate">${c.title}</span>
           </span>
-          <span class="shrink-0 font-bold ${netProfitAt16 >= 0 ? 'text-emerald-600' : 'text-rose-600'}">
+          <span class="shrink-0 font-extrabold text-lg ${netProfitAt16 >= 0 ? 'text-emerald-600' : 'text-rose-600'}">
             ${netProfitAt16 >= 0 ? '+' : ''}${Math.round(netProfitAt16).toLocaleString()}원
           </span>
         </div>
@@ -1341,15 +1346,40 @@ class AppUI {
         const comm = monthData.commissionIncome;
         const promo = monthData.promoIncome;
 
+        // 이 달에 지급되는 개별 프로모션 내역(이름/금액)을 상세히 표기
+        const promoDetailRows = GfcAdvancedEngine.flattenPromotionPayouts(c.promotions)
+          .filter(p => Number(p.afterPaymentMonth) === (incomeRoundIndex + 1))
+          .map(p => {
+            const val = Number(p.value) || 0;
+            const earned = p.type === 'percent' ? Number(c.premium) * (val / 100) : val;
+            return `<div class="flex justify-between text-[11px] text-emerald-700 pl-3"><span>· ${p.groupName} (${p.type === 'percent' ? val + '%' : val.toLocaleString() + '원 고정'})</span><span>+${Math.round(earned).toLocaleString()}원</span></div>`;
+          }).join('');
+
+        const badgeColor = c.contractType === '자기계약' ? 'bg-rose-100 text-rose-700' : 'bg-blue-100 text-blue-700';
+
         return `
-          <div class="p-3 bg-white rounded-xl border border-slate-200 text-xs space-y-1">
-            <div class="flex justify-between font-bold text-slate-800">
-              <span>${c.title} (${c.client}) - [${c.contractType}]</span>
-              <span class="text-emerald-600">+${Math.round(comm + promo).toLocaleString()}원</span>
+          <div class="p-4 bg-white rounded-xl border border-slate-200 text-xs space-y-2">
+            <div class="flex justify-between items-start">
+              <div class="space-y-0.5">
+                <div class="flex items-center gap-1.5">
+                  <span class="px-1.5 py-0.5 rounded text-[10px] font-bold ${badgeColor}">${c.contractType}</span>
+                  <span class="font-bold text-slate-800 text-sm">${c.title}</span>
+                </div>
+                <div class="text-[11px] text-slate-500">${c.client} · ${c.company} · ${c.productGroup}</div>
+              </div>
+              <span class="text-emerald-600 font-bold text-sm">+${Math.round(comm + promo).toLocaleString()}원</span>
             </div>
-            <div class="text-[11px] text-slate-500 flex justify-between">
-              <span>${incomeRoundIndex + 1}회차 납입분 수수료 지급 (수수료율 ${rate}%) | TP: ${tp.toLocaleString()}원</span>
-              <span>수수료: ${Math.round(comm).toLocaleString()}원 / 프로모션: ${Math.round(promo).toLocaleString()}원</span>
+            <div class="border-t border-slate-100 pt-1.5 space-y-1">
+              <div class="text-[11px] text-slate-500 flex justify-between">
+                <span>${incomeRoundIndex + 1}회차 납입분 수수료 지급 (수수료율 ${rate}% · 월납보험료 ${Number(c.premium).toLocaleString()}원 · TP ${tp.toLocaleString()}원)</span>
+                <span class="font-semibold text-slate-700">수수료 +${Math.round(comm).toLocaleString()}원</span>
+              </div>
+              ${promo > 0 ? `
+              <div class="flex justify-between text-[11px] text-emerald-700 font-semibold">
+                <span>이번 달 지급 프로모션 합계</span>
+                <span>+${Math.round(promo).toLocaleString()}원</span>
+              </div>
+              ${promoDetailRows}` : ''}
             </div>
           </div>
         `;
@@ -1473,7 +1503,7 @@ class AppUI {
         ${bonusBreakdown}
         <div>
           <h4 class="font-bold text-slate-800 mb-2 text-xs">해당 월 계약별 수수료 및 프로모션 상세 (수수료 발생 계약 TP 합계: ${totalTP.toLocaleString()}원)</h4>
-          <div class="space-y-2 max-h-[220px] overflow-y-auto custom-scrollbar">
+          <div class="space-y-2 max-h-[420px] overflow-y-auto custom-scrollbar">
             ${contractRows || '<p class="text-slate-400 text-center py-4">해당 월에 실적이 발생하는 정상유지 계약이 없습니다.</p>'}
           </div>
         </div>
@@ -1482,7 +1512,7 @@ class AppUI {
       const expenseSection = `
         <div>
           <h4 class="font-bold text-slate-800 mb-2 text-xs">해당 월 자기계약 보험료 지출 상세</h4>
-          <div class="space-y-2 max-h-[220px] overflow-y-auto custom-scrollbar">
+          <div class="space-y-2 max-h-[420px] overflow-y-auto custom-scrollbar">
             ${selfExpenseDetails || '<p class="text-slate-400 text-center py-4">지출 중인 자기계약이 없습니다.</p>'}
           </div>
         </div>
@@ -1492,19 +1522,35 @@ class AppUI {
       let cumTotalTP = 0;
       let cumContractRows = this.contracts.map(c => {
         const schedule = GfcAdvancedEngine.calculateMonthlySchedule(c, mIdx + 1, this.settings.joinDate, baseDate);
-        let sumComm = 0, sumPromo = 0;
+        let sumComm = 0, sumPromo = 0, sumClawback = 0, paidRounds = 0;
         for (let i = 0; i <= mIdx; i++) {
           const d = schedule[i];
           if (!d) continue;
           sumComm += d.commissionIncome;
           sumPromo += d.promoIncome;
+          sumClawback += d.clawbackAmount;
+          if (d.commissionIncome > 0 || d.promoIncome > 0) paidRounds++;
         }
-        if (sumComm + sumPromo <= 0) return '';
+        if (sumComm + sumPromo <= 0 && sumClawback <= 0) return '';
         cumTotalTP += Number(c.tp) || 0;
+        const badgeColor = c.contractType === '자기계약' ? 'bg-rose-100 text-rose-700' : 'bg-blue-100 text-blue-700';
         return `
-          <div class="p-3 bg-white rounded-xl border border-slate-200 text-xs flex justify-between items-center">
-            <span class="font-bold text-slate-800">${c.title} (${c.client}) - [${c.contractType}]</span>
-            <span class="text-emerald-600 font-bold">+${Math.round(sumComm + sumPromo).toLocaleString()}원</span>
+          <div class="p-4 bg-white rounded-xl border border-slate-200 text-xs space-y-1.5">
+            <div class="flex justify-between items-start">
+              <div class="space-y-0.5">
+                <div class="flex items-center gap-1.5">
+                  <span class="px-1.5 py-0.5 rounded text-[10px] font-bold ${badgeColor}">${c.contractType}</span>
+                  <span class="font-bold text-slate-800 text-sm">${c.title}</span>
+                </div>
+                <div class="text-[11px] text-slate-500">${c.client} · ${c.company} · ${c.productGroup} · TP ${(Number(c.tp) || 0).toLocaleString()}원</div>
+              </div>
+              <span class="text-emerald-600 font-bold text-sm">+${Math.round(sumComm + sumPromo - sumClawback).toLocaleString()}원</span>
+            </div>
+            <div class="border-t border-slate-100 pt-1.5 grid grid-cols-3 gap-1 text-[11px] text-slate-600">
+              <div>수수료 누계<br><strong class="text-slate-800">+${Math.round(sumComm).toLocaleString()}원</strong></div>
+              <div>프로모션 누계<br><strong class="text-slate-800">+${Math.round(sumPromo).toLocaleString()}원</strong></div>
+              <div>환수 누계<br><strong class="${sumClawback > 0 ? 'text-rose-600' : 'text-slate-800'}">-${Math.round(sumClawback).toLocaleString()}원</strong></div>
+            </div>
           </div>
         `;
       }).filter(Boolean).join('');
@@ -1555,7 +1601,7 @@ class AppUI {
         </div>
         <div>
           <h4 class="font-bold text-slate-800 mb-2 text-xs">계약별 누적 수수료 및 프로모션 상세 (등록월~선택월, 관련 계약 TP 합계: ${cumTotalTP.toLocaleString()}원)</h4>
-          <div class="space-y-2 max-h-[220px] overflow-y-auto custom-scrollbar">
+          <div class="space-y-2 max-h-[420px] overflow-y-auto custom-scrollbar">
             ${cumContractRows || '<p class="text-slate-400 text-center py-4">누적 실적이 있는 계약이 없습니다.</p>'}
           </div>
         </div>
@@ -1564,7 +1610,7 @@ class AppUI {
       const cumExpenseSection = `
         <div>
           <h4 class="font-bold text-slate-800 mb-2 text-xs">계약별 누적 자기계약 보험료 지출 상세 (등록월~선택월)</h4>
-          <div class="space-y-2 max-h-[220px] overflow-y-auto custom-scrollbar">
+          <div class="space-y-2 max-h-[420px] overflow-y-auto custom-scrollbar">
             ${cumSelfExpenseRows || '<p class="text-slate-400 text-center py-4">지출 중인 자기계약이 없습니다.</p>'}
           </div>
         </div>
