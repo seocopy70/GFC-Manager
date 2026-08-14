@@ -504,31 +504,53 @@ class GfcAdvancedEngine {
   }
 
   // 특정 계약(c)의 TP가 그 달 신규TP 합계에 더해짐으로써 늘어난 신인/시니어 지원금 증분을 계산.
-  // (해당월 신규 TP 합계로 받는 지원금) - (c를 제외한 신규 TP 합계로 받는 지원금)
-  // 자기계약 수지분석에서 "이 계약 덕분에 추가로 받은 정착수수료/성과보너스"를 반영하기 위해 사용.
+  // 같은 달에 시작된 계약들을 등록 순서(createdAt)대로 정렬해 누적 TP를 쌓아가면서,
+  // "먼저 등록된 계약이 이미 확보한 지원금은 그대로 유지되고, 나중에 추가된 계약은
+  //  그로 인해 새로 늘어난 한계 기여분만 가져가도록" 배분한다.
+  // (예전 방식은 "나를 뺀 나머지 TP"와 단순 비교했는데, 두 계약이 같은 문턱값 구간을 나눠 가지면
+  //  먼저 등록된 계약 쪽 지원금이 거꾸로 줄어드는 등 배분이 꼬이는 문제가 있었음.
+  //  이 방식은 항상 각 계약의 몫을 합치면 정확히 전체 지원금과 일치한다.)
   static calculateAttributedTPBonus(contract, allContracts, joinDateStr, clubKey) {
     const startDate = new Date(contract.startDate);
     const tenureMonth = this.calculateTenureMonth(joinDateStr, startDate);
     const myTP = Number(contract.tp) || 0;
     if (myTP <= 0) return 0;
 
-    let monthlyTPWith = 0;
-    (allContracts || []).forEach(c => {
-      const d = new Date(c.startDate);
-      if (d.getFullYear() === startDate.getFullYear() && d.getMonth() === startDate.getMonth()) {
-        monthlyTPWith += (Number(c.tp) || 0);
+    const sameMonthContracts = (allContracts || [])
+      .filter(c => {
+        const d = new Date(c.startDate);
+        return d.getFullYear() === startDate.getFullYear() && d.getMonth() === startDate.getMonth();
+      })
+      .sort((a, b) => {
+        const ta = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+        const tb = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+        if (ta !== tb) return ta - tb;
+        return String(a.id).localeCompare(String(b.id));
+      });
+
+    const calcBonus = (tp) => {
+      if (tp <= 0) return 0;
+      return tenureMonth <= 24
+        ? this.getNewPlannerSupport(tenureMonth, tp)
+        : this.calculateSeniorPerformanceBonus(tp, clubKey);
+    };
+
+    let cumulativeTP = 0;
+    let bonusBefore = 0;
+    let bonusAfter = 0;
+    for (const c of sameMonthContracts) {
+      const tp = Number(c.tp) || 0;
+      const before = calcBonus(cumulativeTP);
+      cumulativeTP += tp;
+      const after = calcBonus(cumulativeTP);
+      if (c.id === contract.id) {
+        bonusBefore = before;
+        bonusAfter = after;
+        break;
       }
-    });
-    const monthlyTPWithout = Math.max(0, monthlyTPWith - myTP);
+    }
 
-    const bonusWith = tenureMonth <= 24
-      ? this.getNewPlannerSupport(tenureMonth, monthlyTPWith)
-      : this.calculateSeniorPerformanceBonus(monthlyTPWith, clubKey);
-    const bonusWithout = tenureMonth <= 24
-      ? this.getNewPlannerSupport(tenureMonth, monthlyTPWithout)
-      : this.calculateSeniorPerformanceBonus(monthlyTPWithout, clubKey);
-
-    return Math.max(0, bonusWith - bonusWithout);
+    return Math.max(0, bonusAfter - bonusBefore);
   }
 
   // 16회차 해지(=15회 납입 후 해지, 25차월 미도달) 시나리오 전용: 그때까지 지급된
