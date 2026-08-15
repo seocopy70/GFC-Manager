@@ -291,7 +291,7 @@ class GfcAdvancedEngine {
   static getClubBonusParams(clubTierKey) {
     switch (clubTierKey) {
       case 'consultant': return { name: '일반 컨설턴트 (무 Club)', rate: 0.40 };
-      case 'club_30': return { name: '30 만 Club', rate: 0.45 };
+      case 'club_30': return { name: '30 만 Club', rate: 0.20 };
       case 'club_50': return { name: '50 만 Club', rate: 0.50 };
       case 'club_70': return { name: '70 만 Club', rate: 0.60 };
       case 'club_100': return { name: '100 만 Club', rate: 0.65 };
@@ -318,18 +318,18 @@ class GfcAdvancedEngine {
     return Math.round(achBonus + clubBonus + myungInBonus);
   }
 
-  static getNewPlannerSupport(tenureMonth, monthlyTP) {
+  // 정착수수료 (1~11차월만 지급) — 신계약수수료와 동일한 환수율표(COMMISSION_CLAWBACK_TABLE) 적용 대상
+  static getSettlementFee(tenureMonth, monthlyTP) {
+    if (tenureMonth > 11 || monthlyTP <= 0) return 0;
+    if (monthlyTP >= 700000) return 2300000;
+    if (monthlyTP >= 500000) return 2100000;
+    if (monthlyTP >= 300000) return 1500000;
+    return 500000;
+  }
+
+  // 신인성과보너스 (1~24차월) — 별도의 전용 환수율표(NEW_PLANNER_BONUS_CLAWBACK_TABLE) 적용 대상
+  static getNewPlannerPerformanceBonus(tenureMonth, monthlyTP) {
     if (tenureMonth > 24 || monthlyTP <= 0) return 0;
-
-    // 정착수수료(4.2)는 1~11차월에만 지급됨. 12~24차월은 신인성과보너스만 지급.
-    let baseSettlement = 0;
-    if (tenureMonth <= 11) {
-      if (monthlyTP >= 700000) baseSettlement = 2300000;
-      else if (monthlyTP >= 500000) baseSettlement = 2100000;
-      else if (monthlyTP >= 300000) baseSettlement = 1500000;
-      else baseSettlement = 500000;
-    }
-
     let perfBonus = 0;
     if (tenureMonth <= 11) {
       if (monthlyTP >= 1000000) perfBonus = 1900000 + (monthlyTP - 1000000) * 1.5;
@@ -344,8 +344,12 @@ class GfcAdvancedEngine {
       else if (monthlyTP >= 400000) perfBonus = 1000000;
       else if (monthlyTP >= 300000) perfBonus = 900000;
     }
+    return Math.round(perfBonus);
+  }
 
-    return Math.round(baseSettlement + perfBonus);
+  // 정착수수료 + 신인성과보너스 합계 (지원금 총액 표시 등, 클로백이 필요 없는 곳에서 사용)
+  static getNewPlannerSupport(tenureMonth, monthlyTP) {
+    return this.getSettlementFee(tenureMonth, monthlyTP) + this.getNewPlannerPerformanceBonus(tenureMonth, monthlyTP);
   }
 
   // 계약이 특정 시점(targetDate)에 정상적으로 유지되고 있는지 판단 (해지/실효라면 해지월 이전까지만 유지로 봄)
@@ -393,11 +397,12 @@ class GfcAdvancedEngine {
     10: 57, 11: 52, 12: 46, 13: 41, 14: 35, 15: 30
   };
 
-  // 신인성과보너스 개별계약 환수 (구조변경): 신인성과보너스는 "그 달 신규계약 TP 합계"를 기준으로
-  // 월 단위로 지급되기 때문에, 특정 계약 하나가 나중에 해지되면 그 계약이 원래 지급월의 보너스에서
-  // 차지했던 TP 비중(pro-rata)만큼을 그 계약의 "귀속 보너스"로 보고, 해당 계약의 미유지 회차별
-  // 환수율을 적용해 환수액을 계산한다. (regulation에 개별계약 배분 방식이 명시되어 있지 않아
-  // TP 비례 배분으로 추정 구현 — 실제 사규와 다를 수 있으니 결과를 검증해 주세요)
+  // 정착수수료·신인성과보너스 개별계약 환수 (구조변경): 이 두 지원금은 "그 달 신규계약 TP 합계"를
+  // 기준으로 월 단위로 지급되기 때문에, 특정 계약 하나가 나중에 해지되면 그 계약이 원래 지급월의
+  // 보너스에서 차지했던 TP 비중(pro-rata)만큼을 그 계약의 "귀속 보너스"로 보고, 해당 계약의 미유지
+  // 회차별 환수율을 적용해 환수액을 계산한다. 정착수수료는 신계약수수료와 동일한 환수율표를,
+  // 신인성과보너스는 전용 환수율표를 각각 따로 적용한다 (규정집상 서로 다른 표).
+  // (regulation에 개별계약 배분 방식이 명시되어 있지 않아 TP 비례 배분으로 추정 구현)
   static calculateNewPlannerBonusClawback(contracts, joinDateStr, targetDate) {
     let totalClawback = 0;
 
@@ -411,8 +416,9 @@ class GfcAdvancedEngine {
       if (elapsedAtTarget !== terminationMonth) return; // 이번 달에 해지/실효가 발생한 계약만 처리
 
       const terminationRound = terminationMonth + 1; // elapsedMonths(0-based) → 회차(1-based)
-      const clawbackRate = this.NEW_PLANNER_BONUS_CLAWBACK_TABLE[terminationRound] || 0;
-      if (clawbackRate <= 0) return;
+      const settlementClawbackRate = this.COMMISSION_CLAWBACK_TABLE[terminationRound] || 0;
+      const performanceClawbackRate = this.NEW_PLANNER_BONUS_CLAWBACK_TABLE[terminationRound] || 0;
+      if (settlementClawbackRate <= 0 && performanceClawbackRate <= 0) return;
 
       const regTenure = this.calculateTenureMonth(joinDateStr, startDate);
       if (regTenure > 24) return; // 시니어 시절 등록된 계약은 신인성과보너스 대상이 아님
@@ -427,9 +433,12 @@ class GfcAdvancedEngine {
       });
       if (regMonthTotalTP <= 0) return;
 
-      const originalBonus = this.getNewPlannerSupport(regTenure, regMonthTotalTP);
-      const contractShare = originalBonus * ((Number(contract.tp) || 0) / regMonthTotalTP);
-      totalClawback += Math.round(contractShare * (clawbackRate / 100));
+      const myShare = (Number(contract.tp) || 0) / regMonthTotalTP;
+      const originalSettlement = this.getSettlementFee(regTenure, regMonthTotalTP);
+      const originalPerformance = this.getNewPlannerPerformanceBonus(regTenure, regMonthTotalTP);
+
+      totalClawback += Math.round(originalSettlement * myShare * (settlementClawbackRate / 100));
+      totalClawback += Math.round(originalPerformance * myShare * (performanceClawbackRate / 100));
     });
 
     return totalClawback;
@@ -555,6 +564,8 @@ class GfcAdvancedEngine {
 
   // 16회차 해지(=15회 납입 후 해지, 25차월 미도달) 시나리오 전용: 그때까지 지급된
   // '건강상해보너스' 프로모션 전액에 70% 환수를 적용한 금액을 계산
+  // 16회차 해지(=15회 납입 후 해지) 시나리오 전용. 건강상해 건수 보너스의 공식 환수율표(14~25회차)에서
+  // 16회차 미유지에 해당하는 값(70%)을 그대로 사용 — calculateMonthlySchedule의 HEALTH_BONUS_CLAWBACK_TABLE과 동일 출처.
   static calculateHealthBonusClawback(contract, uptoRound = 15) {
     const premium = Number(contract.premium) || 0;
     let total = 0;
@@ -638,9 +649,18 @@ class GfcAdvancedEngine {
         }
       });
 
+      // 건강상해 건수 보너스(=프로모션명 '건강상해보너스') 전용 환수율표 (14~25회차, 규정집 원문)
+      const HEALTH_BONUS_CLAWBACK_TABLE = {
+        14: 100, 15: 100, 16: 70, 17: 65, 18: 60, 19: 55,
+        20: 50, 21: 45, 22: 40, 23: 35, 24: 30, 25: 30
+      };
+
       if (isTerminatedThisMonth) {
-        // (1) 프로모션 환수: '건강상해보너스'라는 이름의 프로모션에 한해, 25차월 이내 해지 시 기지급액의 70% 환수
-        if (terminationMonth < 25) {
+        // (1) 프로모션 환수: '건강상해보너스'라는 이름의 프로모션에 한해, 25회 이내 미유지 시
+        //     미유지회차(14~25회)별 환수율 적용 (건강상해 건수 보너스 전용 표, 신계약수수료 표와 다름)
+        const healthClawbackRound = terminationMonth + 1;
+        const healthClawbackRate = HEALTH_BONUS_CLAWBACK_TABLE[healthClawbackRound] || 0;
+        if (healthClawbackRate > 0) {
           let totalPromoReceived = 0;
           promotionPayouts.forEach(promo => {
             if ((promo.groupName || '').trim() !== '건강상해보너스') return;
@@ -650,19 +670,16 @@ class GfcAdvancedEngine {
               totalPromoReceived += (promo.type === 'percent' ? premium * (pVal / 100) : pVal);
             }
           });
-          clawbackAmount += Math.round(totalPromoReceived * 0.70);
+          clawbackAmount += Math.round(totalPromoReceived * (healthClawbackRate / 100));
         }
 
-        // (2) 수수료 환수: 2~15회차 해지/실효 시 그동안 지급된 누적 수수료를 회차별 환수율로 환수
+        // (2) 신계약수수료 환수: "초회분"에만 회차별 환수율 적용 (이미 지급된 분급분·계약관리보너스는 환수 대상 아님 — 규정집 원문)
         const terminationRound = terminationMonth + 1; // elapsedMonths(0-based) → 회차(1-based)
         const clawbackRate = this.COMMISSION_CLAWBACK_TABLE[terminationRound] || 0;
         if (clawbackRate > 0) {
-          let cumulativeCommission = 0;
-          for (let pastElapsed = 0; pastElapsed < terminationMonth; pastElapsed++) {
-            const pastRate = this.getCombinedCommissionRate(contract.productGroup, pastElapsed, feeRates);
-            cumulativeCommission += tp * (pastRate / 100);
-          }
-          clawbackAmount += Math.round(cumulativeCommission * (clawbackRate / 100));
+          const firstRoundRate = feeRates[0] || 0; // 초회분 요율만 (예: 종신/GI 112%, 건강상해 200%, 금융형 102%)
+          const firstRoundCommission = tp * (firstRoundRate / 100);
+          clawbackAmount += Math.round(firstRoundCommission * (clawbackRate / 100));
         }
       }
 
@@ -1762,7 +1779,7 @@ class AppUI {
             <div>고용보험공제 (0.8%): <strong class="text-rose-600">-${deduction.toLocaleString()}원</strong></div>
             <div class="col-span-2">이 계약의 TP로 늘어난 신인/시니어 지원금: <strong class="text-emerald-600">+${Math.round(tpBonusDiff).toLocaleString()}원</strong></div>
             ${healthBonusClawback > 0 ? `
-            <div class="col-span-2">건강상해보너스 환수 (25차월 미도달, 70%): <strong class="text-rose-600">-${healthBonusClawback.toLocaleString()}원</strong></div>
+            <div class="col-span-2">건강상해보너스 환수 (16회차 미유지, 환수율 70%): <strong class="text-rose-600">-${healthBonusClawback.toLocaleString()}원</strong></div>
             ` : ''}
           </div>
           <div class="border-t border-rose-200 pt-2 flex justify-between items-center">
@@ -1832,7 +1849,7 @@ class AppUI {
         <option value="percent">월초 대비 (%)</option>
         <option value="amount">고정 금액 (원)</option>
       </select>
-      <input type="number" class="promo-value px-2 py-1.5 bg-slate-50 border border-slate-300 rounded text-xs w-24" placeholder="수치" value="${payout ? payout.value : ''}">
+      <input type="text" inputmode="numeric" class="promo-value px-2 py-1.5 bg-slate-50 border border-slate-300 rounded text-xs w-24" placeholder="수치" value="${payout && payout.value ? Number(payout.value).toLocaleString('en-US') : ''}" oninput="formatMoneyInput(this)">
       <input type="number" class="promo-month px-2 py-1.5 bg-slate-50 border border-slate-300 rounded text-xs w-24" placeholder="납입회차" value="${payout ? payout.afterPaymentMonth : 1}" min="1" max="60" title="N 회차 납입 후 익월 지급">
       <span class="text-[10px] text-slate-500 whitespace-nowrap">회차 납입 후 익월</span>
       <button type="button" class="btn-remove-promo-payout ml-auto text-rose-400 hover:text-rose-600 p-1">
@@ -1884,10 +1901,10 @@ class AppUI {
         document.getElementById('form-company').value = contract.company || '삼성생명';
         document.getElementById('form-title').value = contract.title || '';
         document.getElementById('form-startDate').value = contract.startDate || '';
-        document.getElementById('form-premium').value = contract.premium || '';
+        document.getElementById('form-premium').value = contract.premium ? Number(contract.premium).toLocaleString('en-US') : '';
         document.getElementById('form-paymentYears').value = contract.paymentYears || 20;
-        document.getElementById('form-tp').value = contract.tp || 0;
-        document.getElementById('form-surrenderValue16').value = contract.surrenderValue16 || 0;
+        document.getElementById('form-tp').value = contract.tp ? Number(contract.tp).toLocaleString('en-US') : '';
+        document.getElementById('form-surrenderValue16').value = Number(contract.surrenderValue16 || 0).toLocaleString('en-US');
         document.getElementById('form-memo').value = contract.memo || '';
 
         if (contract.promotions && contract.promotions.length > 0) {
@@ -1928,7 +1945,7 @@ class AppUI {
       payoutRows.forEach(row => {
         payouts.push({
           type: row.querySelector('.promo-type').value,
-          value: Number(row.querySelector('.promo-value').value) || 0,
+          value: Number(String(row.querySelector('.promo-value').value || '').replace(/,/g, '')) || 0,
           afterPaymentMonth: Number(row.querySelector('.promo-month').value) || 1
         });
       });
@@ -1948,10 +1965,10 @@ class AppUI {
       company: document.getElementById('form-company').value.trim(),
       title: document.getElementById('form-title').value.trim(),
       startDate: document.getElementById('form-startDate').value,
-      premium: Number(document.getElementById('form-premium').value) || 0,
+      premium: Number(document.getElementById('form-premium').value.replace(/,/g, '')) || 0,
       paymentYears: Number(document.getElementById('form-paymentYears').value) || 20,
-      tp: Number(document.getElementById('form-tp').value) || 0,
-      surrenderValue16: Number(document.getElementById('form-surrenderValue16').value) || 0,
+      tp: Number(document.getElementById('form-tp').value.replace(/,/g, '')) || 0,
+      surrenderValue16: Number(document.getElementById('form-surrenderValue16').value.replace(/,/g, '')) || 0,
       promotions: promotions,
       memo: document.getElementById('form-memo').value.trim()
     };
