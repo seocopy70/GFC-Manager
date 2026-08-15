@@ -580,6 +580,66 @@ class GfcAdvancedEngine {
     return Math.round(total * 0.70);
   }
 
+  // 자기계약 등록/수정 시 "16회차 해지를 전제로 이 계약을 하는 게 유리한가"를 판단.
+  // 계약 자체의 손익(수수료+프로모션-지출+해약환급금-환수)뿐 아니라, 이 계약의 TP가 그 달 다른
+  // 계약들과 합쳐지면서 신인/시니어 지원금이 얼마나 더 늘어나는지(문턱효과)까지 함께 반영한다.
+  // candidate.id가 allContracts 안에 이미 있으면(수정 중인 기존 계약) 자기 자신은 제외하고 계산.
+  static evaluateSelfContractDecision(candidateRaw, allContracts, joinDateStr, clubKey) {
+    const startDate = new Date(candidateRaw.startDate);
+    if (!candidateRaw.startDate || isNaN(startDate.getTime())) return null;
+
+    const premium = Number(candidateRaw.premium) || 0;
+    const tp = Number(candidateRaw.tp) || 0;
+    if (premium <= 0 || tp <= 0) return null;
+
+    // 이 계약이 아직 등록 전(신규)이라면, TP 문턱효과 계산에서 항상 "마지막에 추가된 계약"으로
+    // 취급되도록 최신 시각을 부여한다 (그래야 기존 계약들이 이미 확보한 몫을 가로채지 않음).
+    const candidate = { ...candidateRaw, createdAt: candidateRaw.createdAt || new Date().toISOString() };
+    const others = (allContracts || []).filter(c => c.id !== candidate.id);
+
+    const isSenior = this.calculateTenureMonth(joinDateStr, startDate) > 24;
+    const surrender16 = Number(candidate.surrenderValue16) || 0;
+
+    const feeRates = this.getFeeSchedule(candidate.productGroup, isSenior);
+    const totalComm = this.calculateTotalCommissionThrough15Rounds(candidate, feeRates);
+    const totalPromoCalc = this.flattenPromotionPayouts(candidate.promotions).reduce((sum, p) => {
+      const val = Number(p.value) || 0;
+      return sum + (p.type === 'percent' ? premium * (val / 100) : val);
+    }, 0);
+    const totalGross = totalComm + totalPromoCalc;
+    const totalIncomeNet = totalGross * (1 - 0.008);
+    const totalExpense15 = premium * 15;
+    const tpBonusDiff = this.calculateAttributedTPBonus(candidate, [...others, candidate], joinDateStr, clubKey);
+    const healthBonusClawback = this.calculateHealthBonusClawback(candidate, 15);
+    const netProfitAt16 = totalIncomeNet + surrender16 - totalExpense15 + tpBonusDiff - healthBonusClawback;
+
+    // TP 문턱효과: 이 계약을 제외/포함했을 때 그 달 신인/시니어 지원금 비교 (판단 근거 표시용)
+    let otherTP = 0;
+    others.forEach(c => {
+      const d = new Date(c.startDate);
+      if (d.getFullYear() === startDate.getFullYear() && d.getMonth() === startDate.getMonth()) {
+        otherTP += (Number(c.tp) || 0);
+      }
+    });
+    const tenureMonth = this.calculateTenureMonth(joinDateStr, startDate);
+    const bonusWithout = tenureMonth <= 24 ? this.getNewPlannerSupport(tenureMonth, otherTP) : this.calculateSeniorPerformanceBonus(otherTP, clubKey);
+    const bonusWith = tenureMonth <= 24 ? this.getNewPlannerSupport(tenureMonth, otherTP + tp) : this.calculateSeniorPerformanceBonus(otherTP + tp, clubKey);
+
+    return {
+      netProfitAt16: Math.round(netProfitAt16),
+      totalIncomeNet: Math.round(totalIncomeNet),
+      totalExpense15,
+      surrender16,
+      tpBonusDiff: Math.round(tpBonusDiff),
+      healthBonusClawback,
+      otherTP,
+      monthTP: otherTP + tp,
+      bonusWithout: Math.round(bonusWithout),
+      bonusWith: Math.round(bonusWith),
+      verdict: netProfitAt16 >= 0 ? 'good' : 'bad'
+    };
+  }
+
   static getFeeSchedule(productGroup, isSenior = false) {
     if (!isSenior) {
       if (productGroup === '종신/GI 보험') return [112, 8,8,8,8,8,8,8,8,8,8,8, 20,20, 12];
@@ -852,6 +912,7 @@ class AppUI {
     this.promotionsContainer = document.getElementById('promotions-container');
     this.formStatus = document.getElementById('form-status');
     this.terminationWrapper = document.getElementById('termination-month-wrapper');
+    this.selfVerdictPanel = document.getElementById('self-verdict-panel');
 
     this.rulesModal = document.getElementById('rules-modal');
     this.btnOpenRulesModal = document.getElementById('btn-open-rules-modal');
@@ -903,6 +964,8 @@ class AppUI {
     });
 
     this.contractForm.addEventListener('submit', (e) => this.handleFormSubmit(e));
+    this.contractForm.addEventListener('input', () => this.updateSelfVerdictPanel());
+    this.contractForm.addEventListener('change', () => this.updateSelfVerdictPanel());
 
     this.formStatus.addEventListener('change', (e) => {
       if (e.target.value === '해지' || e.target.value === '실효') {
@@ -1925,6 +1988,77 @@ class AppUI {
     }
 
     this.modal.classList.remove('hidden');
+    lucide.createIcons();
+    this.updateSelfVerdictPanel();
+  }
+
+  // 자기계약 폼에서 입력값이 바뀔 때마다 "16회차 해지를 전제로 이 계약이 유리한가"를 실시간으로 계산해 보여줌.
+  // 계약 자체 손익뿐 아니라, 이 계약의 TP가 그 달 다른 계약들과 합쳐지며 늘어나는 신인/시니어 지원금(문턱효과)까지 함께 반영.
+  updateSelfVerdictPanel() {
+    const checkedType = this.contractForm.querySelector('input[name="contractType"]:checked');
+    if (!checkedType || checkedType.value !== '자기계약') {
+      this.selfVerdictPanel.classList.add('hidden');
+      return;
+    }
+
+    const startDateVal = document.getElementById('form-startDate').value;
+    const premium = Number(document.getElementById('form-premium').value.replace(/,/g, '')) || 0;
+    const tp = Number(document.getElementById('form-tp').value.replace(/,/g, '')) || 0;
+    const surrenderValue16 = Number(document.getElementById('form-surrenderValue16').value.replace(/,/g, '')) || 0;
+    const productGroup = document.getElementById('form-productGroup').value;
+
+    if (!startDateVal || premium <= 0 || tp <= 0) {
+      this.selfVerdictPanel.classList.add('hidden');
+      return;
+    }
+
+    const promoGroups = this.promotionsContainer.querySelectorAll('.promo-group');
+    const promotions = [];
+    promoGroups.forEach(group => {
+      const name = group.querySelector('.promo-name').value.trim();
+      const payoutRows = group.querySelectorAll('.promo-payout-row');
+      const payouts = [];
+      payoutRows.forEach(row => {
+        payouts.push({
+          type: row.querySelector('.promo-type').value,
+          value: Number(String(row.querySelector('.promo-value').value || '').replace(/,/g, '')) || 0,
+          afterPaymentMonth: Number(row.querySelector('.promo-month').value) || 1
+        });
+      });
+      if (payouts.length > 0) promotions.push({ name: name || '프로모션', payouts });
+    });
+
+    const editingId = document.getElementById('form-id').value || '__preview__';
+    const candidate = { id: editingId, productGroup, premium, tp, surrenderValue16, startDate: startDateVal, promotions };
+
+    const result = GfcAdvancedEngine.evaluateSelfContractDecision(candidate, this.contracts, this.settings.joinDate, this.selectClubTier.value || 'club_350');
+    if (!result) {
+      this.selfVerdictPanel.classList.add('hidden');
+      return;
+    }
+
+    const isGood = result.verdict === 'good';
+    this.selfVerdictPanel.classList.remove('hidden');
+    this.selfVerdictPanel.className = `p-4 rounded-xl border-2 space-y-2 transition ${isGood ? 'bg-emerald-50 border-emerald-400' : 'bg-rose-50 border-rose-400'}`;
+    this.selfVerdictPanel.innerHTML = `
+      <div class="flex items-center justify-between gap-2">
+        <span class="font-bold ${isGood ? 'text-emerald-800' : 'text-rose-800'} text-sm flex items-center gap-1.5">
+          <i data-lucide="${isGood ? 'thumbs-up' : 'thumbs-down'}" class="w-4 h-4 shrink-0"></i>
+          16회차 해지 가정 시 ${isGood ? '유리한' : '불리한'} 자기계약으로 보입니다
+        </span>
+        <span class="font-extrabold text-lg shrink-0 ${isGood ? 'text-emerald-700' : 'text-rose-700'}">${result.netProfitAt16 >= 0 ? '+' : ''}${result.netProfitAt16.toLocaleString()}원</span>
+      </div>
+      <div class="grid grid-cols-2 gap-1.5 text-[11px] text-slate-700">
+        <div>15회 납입지출: <strong class="text-rose-600">-${result.totalExpense15.toLocaleString()}원</strong></div>
+        <div>수수료+프로모션(공제후): <strong class="text-emerald-600">+${result.totalIncomeNet.toLocaleString()}원</strong></div>
+        <div>16회 해약환급금: <strong class="text-blue-600">+${result.surrender16.toLocaleString()}원</strong></div>
+        <div>이 계약의 TP 지원금 증분: <strong class="text-emerald-600">+${result.tpBonusDiff.toLocaleString()}원</strong></div>
+        ${result.healthBonusClawback > 0 ? `<div class="col-span-2">건강상해보너스 환수: <strong class="text-rose-600">-${result.healthBonusClawback.toLocaleString()}원</strong></div>` : ''}
+      </div>
+      <div class="pt-1.5 border-t ${isGood ? 'border-emerald-200' : 'border-rose-200'} text-[11px] text-slate-600">
+        이 계약 등록월 TP 문턱효과: 제외 시 ${result.otherTP.toLocaleString()}원(지원금 ${result.bonusWithout.toLocaleString()}원) → 포함 시 ${result.monthTP.toLocaleString()}원(지원금 ${result.bonusWith.toLocaleString()}원)
+      </div>
+    `;
     lucide.createIcons();
   }
 
