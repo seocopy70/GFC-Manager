@@ -288,9 +288,48 @@ class GfcAdvancedEngine {
     return earliest;
   }
 
+  // Club 등급별 기준액 (원 단위, 높은 순) — 자동 등급 추정 및 문턱효과 판정에 공용으로 사용
+  static CLUB_TIERS = [
+    { key: 'club_350', name: '프레스티지 명인(명인P)', threshold: 3500000 },
+    { key: 'club_230', name: '명인 Club', threshold: 2300000 },
+    { key: 'club_150', name: '150만 Club', threshold: 1500000 },
+    { key: 'club_100', name: '100만 Club', threshold: 1000000 },
+    { key: 'club_70', name: '70만 Club', threshold: 700000 },
+    { key: 'club_50', name: '50만 Club', threshold: 500000 },
+    { key: 'club_30', name: '30만 Club', threshold: 300000 }
+  ];
+
+  static getTierForTP(tp) {
+    for (const t of this.CLUB_TIERS) {
+      if (tp >= t.threshold) return t;
+    }
+    return { key: 'consultant', name: '일반 컨설턴트(무 Club)', threshold: 0 };
+  }
+
+  // 최근 N개월(기본 3개월) 평균 TP를 기준으로 Club 등급을 자동 추정.
+  // 실제 심사는 분기(1,4,7,10월)마다 직전 3개월 또는 6개월 실적으로 이뤄지고 그 기준월 수도
+  // 현재 등급에 따라 달라지는 등 더 복잡하지만, 이 앱에서는 매달 갱신되는 "최근 3개월 평균" 추정치로 단순화.
+  static estimateClubTier(contracts, targetDate, months = 3) {
+    let total = 0;
+    for (let i = 0; i < months; i++) {
+      const d = new Date(targetDate.getFullYear(), targetDate.getMonth() - i, 1);
+      let monthTP = 0;
+      (contracts || []).forEach(c => {
+        const sd = new Date(c.startDate);
+        if (sd.getFullYear() === d.getFullYear() && sd.getMonth() === d.getMonth()) {
+          monthTP += Number(c.tp) || 0;
+        }
+      });
+      total += monthTP;
+    }
+    const avgTP = total / months;
+    const tier = this.getTierForTP(avgTP);
+    return { avgTP: Math.round(avgTP), tierKey: tier.key, tierName: tier.name };
+  }
+
   static getClubBonusParams(clubTierKey) {
     switch (clubTierKey) {
-      case 'consultant': return { name: '일반 컨설턴트 (무 Club)', rate: 0.40 };
+      case 'consultant': return { name: '일반 컨설턴트 (무 Club)', rate: 0 };
       case 'club_30': return { name: '30 만 Club', rate: 0.20 };
       case 'club_50': return { name: '50 만 Club', rate: 0.50 };
       case 'club_70': return { name: '70 만 Club', rate: 0.60 };
@@ -625,6 +664,18 @@ class GfcAdvancedEngine {
     const bonusWithout = tenureMonth <= 24 ? this.getNewPlannerSupport(tenureMonth, otherTP) : this.calculateSeniorPerformanceBonus(otherTP, clubKey);
     const bonusWith = tenureMonth <= 24 ? this.getNewPlannerSupport(tenureMonth, otherTP + tp) : this.calculateSeniorPerformanceBonus(otherTP + tp, clubKey);
 
+    // 30만 TP는 GFC 활동 유지의 최소 기준선이자, 연속 3개월 미달 시 업적분/성과보너스 자체가 끊기는
+    // 문턱값이라 단순 금액 이상의 의미가 있음. 이 계약이 없으면 이번 달 30만에 못 미치는지 확인.
+    const monthTP = otherTP + tp;
+    const essentialFor30 = otherTP < 300000 && monthTP >= 300000;
+    const stillBelow30 = monthTP < 300000;
+
+    // 이 계약으로 새로 넘어서는 Club 등급 문턱(들)을 확인 — 단순 지원금 액수뿐 아니라
+    // Club 등급 자체를 유지/승급하는 데 필요한 계약인지 판단하기 위함
+    const crossedTiers = this.CLUB_TIERS.filter(t => otherTP < t.threshold && monthTP >= t.threshold).map(t => t.name);
+    const currentClubThreshold = (this.CLUB_TIERS.find(t => t.key === clubKey) || {}).threshold || 0;
+    const essentialForCurrentClub = currentClubThreshold > 0 && otherTP < currentClubThreshold && monthTP >= currentClubThreshold;
+
     return {
       netProfitAt16: Math.round(netProfitAt16),
       totalIncomeNet: Math.round(totalIncomeNet),
@@ -633,9 +684,13 @@ class GfcAdvancedEngine {
       tpBonusDiff: Math.round(tpBonusDiff),
       healthBonusClawback,
       otherTP,
-      monthTP: otherTP + tp,
+      monthTP,
       bonusWithout: Math.round(bonusWithout),
       bonusWith: Math.round(bonusWith),
+      essentialFor30,
+      stillBelow30,
+      crossedTiers,
+      essentialForCurrentClub,
       verdict: netProfitAt16 >= 0 ? 'good' : 'bad'
     };
   }
@@ -898,6 +953,8 @@ class AppUI {
     this.plannerJoinInput = document.getElementById('planner-join-date');
     this.plannerTenureBadge = document.getElementById('planner-tenure-badge');
     this.selectClubTier = document.getElementById('select-club-tier');
+    this.clubTierEstimate = document.getElementById('club-tier-estimate');
+    this.btnApplyClubEstimate = document.getElementById('btn-apply-club-estimate');
 
     this.tabAllFlow = document.getElementById('tab-all-flow');
     this.tabSelfFlow = document.getElementById('tab-self-flow');
@@ -983,6 +1040,14 @@ class AppUI {
 
     this.selectClubTier.addEventListener('change', async (e) => {
       this.settings.clubTier = e.target.value;
+      this.renderAll();
+      try { await ContractStore.saveSettings(this.settings); } catch (err) { console.error(err); }
+    });
+
+    this.btnApplyClubEstimate.addEventListener('click', async () => {
+      const estimate = GfcAdvancedEngine.estimateClubTier(this.contracts, new Date());
+      this.selectClubTier.value = estimate.tierKey;
+      this.settings.clubTier = estimate.tierKey;
       this.renderAll();
       try { await ContractStore.saveSettings(this.settings); } catch (err) { console.error(err); }
     });
@@ -1113,11 +1178,23 @@ class AppUI {
     const tenure = GfcAdvancedEngine.calculateTenureMonth(this.settings.joinDate);
     this.plannerTenureBadge.textContent = `${tenure}차월`;
 
+    this.renderClubTierEstimate();
     this.renderKPIs();
     this.renderContractTable();
     this.renderSelfAnalysis();
     this.renderChart();
     lucide.createIcons();
+  }
+
+  // 최근 3개월 평균 TP 기준으로 Club 등급을 자동 추정해서 표시. 현재 설정값과 다르면 반영 버튼 노출.
+  renderClubTierEstimate() {
+    const estimate = GfcAdvancedEngine.estimateClubTier(this.contracts, new Date());
+    this.clubTierEstimate.textContent = `(최근 3개월 평균 TP ${estimate.avgTP.toLocaleString()}원 → 추정: ${estimate.tierName})`;
+    if (estimate.tierKey !== (this.settings.clubTier || 'club_350')) {
+      this.btnApplyClubEstimate.classList.remove('hidden');
+    } else {
+      this.btnApplyClubEstimate.classList.add('hidden');
+    }
   }
 
   renderKPIs() {
@@ -2038,8 +2115,26 @@ class AppUI {
     }
 
     const isGood = result.verdict === 'good';
+    // 30만 기준선 또는 현재 Club 등급 유지에 필수적인 계약이면, 단순 금액 손익과 별개로 강조 표시
+    const isCritical = result.essentialFor30 || result.essentialForCurrentClub || result.crossedTiers.length > 0;
+    const panelColor = isCritical ? 'bg-amber-50 border-amber-400' : (isGood ? 'bg-emerald-50 border-emerald-400' : 'bg-rose-50 border-rose-400');
+
     this.selfVerdictPanel.classList.remove('hidden');
-    this.selfVerdictPanel.className = `p-4 rounded-xl border-2 space-y-2 transition ${isGood ? 'bg-emerald-50 border-emerald-400' : 'bg-rose-50 border-rose-400'}`;
+    this.selfVerdictPanel.className = `p-4 rounded-xl border-2 space-y-2 transition ${panelColor}`;
+
+    let criticalBadges = '';
+    if (result.essentialFor30) {
+      criticalBadges += `<div class="p-2 rounded-lg bg-amber-100 border border-amber-400 text-amber-900 text-[11px] font-bold flex items-center gap-1.5"><i data-lucide="alert-triangle" class="w-3.5 h-3.5 shrink-0"></i>이 계약이 없으면 이번 달 TP가 30만 미만입니다 — GFC 활동 유지 최소 기준 미달 위험 (단순 손익 계산을 넘어서는 중요한 계약)</div>`;
+    } else if (result.stillBelow30) {
+      criticalBadges += `<div class="p-2 rounded-lg bg-slate-100 border border-slate-300 text-slate-600 text-[11px]">이 계약을 포함해도 이번 달 TP가 아직 30만 미만입니다 (${result.monthTP.toLocaleString()}원)</div>`;
+    }
+    if (result.essentialForCurrentClub) {
+      criticalBadges += `<div class="p-2 rounded-lg bg-amber-100 border border-amber-400 text-amber-900 text-[11px] font-bold flex items-center gap-1.5"><i data-lucide="award" class="w-3.5 h-3.5 shrink-0"></i>이 계약이 없으면 현재 설정된 Club 등급 유지 기준(${result.monthTP.toLocaleString()}원 필요)에 못 미칩니다</div>`;
+    }
+    if (result.crossedTiers.length > 0) {
+      criticalBadges += `<div class="p-2 rounded-lg bg-amber-100 border border-amber-400 text-amber-900 text-[11px] font-bold flex items-center gap-1.5"><i data-lucide="trending-up" class="w-3.5 h-3.5 shrink-0"></i>이 계약으로 새로 도달하는 Club 등급: ${result.crossedTiers.join(', ')}</div>`;
+    }
+
     this.selfVerdictPanel.innerHTML = `
       <div class="flex items-center justify-between gap-2">
         <span class="font-bold ${isGood ? 'text-emerald-800' : 'text-rose-800'} text-sm flex items-center gap-1.5">
@@ -2048,6 +2143,7 @@ class AppUI {
         </span>
         <span class="font-extrabold text-lg shrink-0 ${isGood ? 'text-emerald-700' : 'text-rose-700'}">${result.netProfitAt16 >= 0 ? '+' : ''}${result.netProfitAt16.toLocaleString()}원</span>
       </div>
+      ${criticalBadges}
       <div class="grid grid-cols-2 gap-1.5 text-[11px] text-slate-700">
         <div>15회 납입지출: <strong class="text-rose-600">-${result.totalExpense15.toLocaleString()}원</strong></div>
         <div>수수료+프로모션(공제후): <strong class="text-emerald-600">+${result.totalIncomeNet.toLocaleString()}원</strong></div>
