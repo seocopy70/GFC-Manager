@@ -619,6 +619,25 @@ class GfcAdvancedEngine {
     return Math.round(total * 0.70);
   }
 
+  // '건강상해보너스' 이외의 모든 프로모션(상품프로모션/지점지원금/직접입력 등) 공통 환수 규칙:
+  // 프로모션 명칭과 무관하게, 지급 시기(afterPaymentMonth)가 13회차 이후이고 25회차 이전에 해지되면
+  // 그때까지 지급된 해당 프로모션 금액의 70%를 일괄 환수한다. (건강상해보너스는 자체 14~25회 환수율표를 그대로 유지)
+  static calculateGeneralPromoClawback(contract, uptoRound = 15) {
+    const terminationRound = uptoRound + 1; // uptoRound까지 납입 후 해지 = 해지(미유지) 회차
+    if (terminationRound >= 25) return 0; // 25회차 이후 해지는 이 규칙 대상 아님
+    const premium = Number(contract.premium) || 0;
+    let total = 0;
+    this.flattenPromotionPayouts(contract.promotions).forEach(p => {
+      if ((p.groupName || '').trim() === '건강상해보너스') return; // 건강상해보너스는 전용 규칙 사용, 중복 환수 방지
+      const round = Number(p.afterPaymentMonth) || 1;
+      if (round >= 13 && round <= uptoRound) {
+        const val = Number(p.value) || 0;
+        total += (p.type === 'percent' ? premium * (val / 100) : val);
+      }
+    });
+    return Math.round(total * 0.70);
+  }
+
   // 자기계약 등록/수정 시 "16회차 해지를 전제로 이 계약을 하는 게 유리한가"를 판단.
   // 계약 자체의 손익(수수료+프로모션-지출+해약환급금-환수)뿐 아니라, 이 계약의 TP가 그 달 다른
   // 계약들과 합쳐지면서 신인/시니어 지원금이 얼마나 더 늘어나는지(문턱효과)까지 함께 반영한다.
@@ -650,7 +669,8 @@ class GfcAdvancedEngine {
     const totalExpense15 = premium * 15;
     const tpBonusDiff = this.calculateAttributedTPBonus(candidate, [...others, candidate], joinDateStr, clubKey);
     const healthBonusClawback = this.calculateHealthBonusClawback(candidate, 15);
-    const netProfitAt16 = totalIncomeNet + surrender16 - totalExpense15 + tpBonusDiff - healthBonusClawback;
+    const generalPromoClawback = this.calculateGeneralPromoClawback(candidate, 15);
+    const netProfitAt16 = totalIncomeNet + surrender16 - totalExpense15 + tpBonusDiff - healthBonusClawback - generalPromoClawback;
 
     // TP 문턱효과: 이 계약을 제외/포함했을 때 그 달 신인/시니어 지원금 비교 (판단 근거 표시용)
     let otherTP = 0;
@@ -683,6 +703,7 @@ class GfcAdvancedEngine {
       surrender16,
       tpBonusDiff: Math.round(tpBonusDiff),
       healthBonusClawback,
+      generalPromoClawback,
       otherTP,
       monthTP,
       bonusWithout: Math.round(bonusWithout),
@@ -795,6 +816,22 @@ class GfcAdvancedEngine {
           const firstRoundRate = feeRates[0] || 0; // 초회분 요율만 (예: 종신/GI 112%, 건강상해 200%, 금융형 102%)
           const firstRoundCommission = tp * (firstRoundRate / 100);
           clawbackAmount += Math.round(firstRoundCommission * (clawbackRate / 100));
+        }
+
+        // (3) 그 외 프로모션(상품프로모션·지점지원금·직접입력 등) 공통 환수: 프로모션 명칭과 무관하게
+        //     지급 회차가 13회차 이후이고 25회차 이전 해지 시, 그때까지 지급된 금액의 70%를 일괄 환수
+        //     (건강상해보너스는 위 (1)의 전용 환수율표를 그대로 사용하므로 여기서는 제외해 중복 환수 방지)
+        if (terminationRound < 25) {
+          let totalGeneralPromoReceived = 0;
+          promotionPayouts.forEach(promo => {
+            if ((promo.groupName || '').trim() === '건강상해보너스') return;
+            const targetDepositMonth = Number(promo.afterPaymentMonth) || 1;
+            if (targetDepositMonth >= 13 && targetDepositMonth <= terminationMonth) {
+              let pVal = Number(promo.value) || 0;
+              totalGeneralPromoReceived += (promo.type === 'percent' ? premium * (pVal / 100) : pVal);
+            }
+          });
+          clawbackAmount += Math.round(totalGeneralPromoReceived * 0.70);
         }
       }
 
@@ -918,6 +955,7 @@ class GfcAdvancedEngine {
 class AppUI {
   constructor() {
     this.contracts = [];
+    this.recentlyDeleted = []; // 최근 삭제한 계약 최대 3개 (다시 불러오기용, 세션 한정)
     this.chart = null;
     this.currentFilter = 'all';
     this.searchTerm = '';
@@ -947,6 +985,8 @@ class AppUI {
 
     this.tbody = document.getElementById('contract-list-tbody');
     this.emptyState = document.getElementById('empty-state');
+    this.recentlyDeletedBar = document.getElementById('recently-deleted-bar');
+    this.recentlyDeletedList = document.getElementById('recently-deleted-list');
     this.searchInput = document.getElementById('search-input');
     this.chartRangeSelect = document.getElementById('chart-range');
     this.selfAnalysisContainer = document.getElementById('self-contract-analysis');
@@ -1183,6 +1223,7 @@ class AppUI {
     this.renderContractTable();
     this.renderSelfAnalysis();
     this.renderChart();
+    this.renderRecentlyDeleted();
     lucide.createIcons();
   }
 
@@ -1891,7 +1932,8 @@ class AppUI {
     const totalExpense15 = premium * 15;
     const tpBonusDiff = GfcAdvancedEngine.calculateAttributedTPBonus(c, this.contracts, this.settings.joinDate, this.selectClubTier.value || 'club_350');
     const healthBonusClawback = GfcAdvancedEngine.calculateHealthBonusClawback(c, 15);
-    const netProfitAt16 = totalIncomeNet + surrender16 - totalExpense15 + tpBonusDiff - healthBonusClawback;
+    const generalPromoClawback = GfcAdvancedEngine.calculateGeneralPromoClawback(c, 15);
+    const netProfitAt16 = totalIncomeNet + surrender16 - totalExpense15 + tpBonusDiff - healthBonusClawback - generalPromoClawback;
 
     let monthlyCommRows = feeRates.map((rate, idx) => {
       const combinedRate = GfcAdvancedEngine.getCombinedCommissionRate(c.productGroup, idx, feeRates);
@@ -1920,6 +1962,9 @@ class AppUI {
             <div class="col-span-2">이 계약의 TP로 늘어난 신인/시니어 지원금: <strong class="text-emerald-600">+${Math.round(tpBonusDiff).toLocaleString()}원</strong></div>
             ${healthBonusClawback > 0 ? `
             <div class="col-span-2">건강상해보너스 환수 (16회차 미유지, 환수율 70%): <strong class="text-rose-600">-${healthBonusClawback.toLocaleString()}원</strong></div>
+            ` : ''}
+            ${generalPromoClawback > 0 ? `
+            <div class="col-span-2">기타 프로모션 환수 (13회차 이후 지급분, 25회차 이전 해지, 환수율 70%): <strong class="text-rose-600">-${generalPromoClawback.toLocaleString()}원</strong></div>
             ` : ''}
           </div>
           <div class="border-t border-rose-200 pt-2 flex justify-between items-center">
@@ -1950,16 +1995,33 @@ class AppUI {
     lucide.createIcons();
   }
 
+  // 프로모션 카드(드롭다운 선택 또는 직접입력)에서 최종 프로모션 명칭을 읽어온다.
+  getPromoGroupName(group) {
+    const select = group.querySelector('.promo-name-select');
+    const custom = group.querySelector('.promo-name-custom');
+    if (select && select.value === '__custom__') {
+      return (custom && custom.value.trim()) || '프로모션';
+    }
+    return (select && select.value) || '프로모션';
+  }
+
   addPromoGroup(promo = null) {
     const div = document.createElement('div');
     div.className = 'promo-group bg-white rounded-lg border border-emerald-200 p-2.5 space-y-2';
     div.innerHTML = `
       <div class="flex items-center gap-2">
-        <input type="text" class="promo-name flex-1 px-2 py-1.5 bg-slate-50 border border-slate-300 rounded text-xs font-semibold focus:ring-2 focus:ring-emerald-500 focus:outline-none" placeholder="프로모션 명칭 (예: 변액전환 프로모션)">
-        <button type="button" class="btn-remove-promo-group text-rose-500 hover:text-rose-700 p-1" title="이 프로모션 전체 삭제">
+        <select class="promo-name-select px-2 py-1.5 bg-slate-50 border border-slate-300 rounded text-xs font-semibold focus:ring-2 focus:ring-emerald-500 focus:outline-none">
+          <option value="건강상해보너스">건강상해보너스</option>
+          <option value="상품프로모션">상품프로모션</option>
+          <option value="지점지원금">지점지원금</option>
+          <option value="__custom__">직접입력...</option>
+        </select>
+        <input type="text" class="promo-name-custom hidden flex-1 px-2 py-1.5 bg-slate-50 border border-slate-300 rounded text-xs font-semibold focus:ring-2 focus:ring-emerald-500 focus:outline-none" placeholder="프로모션 명칭 직접 입력">
+        <button type="button" class="btn-remove-promo-group text-rose-500 hover:text-rose-700 p-1 ml-auto" title="이 프로모션 전체 삭제">
           <i data-lucide="trash-2" class="w-4 h-4"></i>
         </button>
       </div>
+      <p class="text-[10px] text-slate-400 -mt-1">건강상해보너스 외 프로모션은 13회차 이후 지급분이 25회차 이전 해지 시 70% 환수됩니다.</p>
       <div class="promo-payouts-container space-y-1.5"></div>
       <button type="button" class="btn-add-promo-payout text-[11px] text-emerald-700 hover:text-emerald-900 font-medium flex items-center gap-1">
         <i data-lucide="plus" class="w-3 h-3"></i> 회차/금액 추가
@@ -1967,7 +2029,32 @@ class AppUI {
     `;
     this.promotionsContainer.appendChild(div);
 
-    div.querySelector('.promo-name').value = (promo && promo.name) ? promo.name : '';
+    const STANDARD_PROMO_NAMES = ['건강상해보너스', '상품프로모션', '지점지원금'];
+    const nameSelect = div.querySelector('.promo-name-select');
+    const nameCustom = div.querySelector('.promo-name-custom');
+    const existingName = (promo && promo.name) ? promo.name.trim() : '';
+
+    if (!existingName) {
+      nameSelect.value = '상품프로모션';
+      nameCustom.classList.add('hidden');
+    } else if (STANDARD_PROMO_NAMES.includes(existingName)) {
+      nameSelect.value = existingName;
+      nameCustom.classList.add('hidden');
+    } else {
+      nameSelect.value = '__custom__';
+      nameCustom.value = existingName;
+      nameCustom.classList.remove('hidden');
+    }
+
+    nameSelect.addEventListener('change', () => {
+      if (nameSelect.value === '__custom__') {
+        nameCustom.classList.remove('hidden');
+        nameCustom.focus();
+      } else {
+        nameCustom.classList.add('hidden');
+      }
+    });
+
     div.querySelector('.btn-remove-promo-group').addEventListener('click', () => div.remove());
 
     const payoutsContainer = div.querySelector('.promo-payouts-container');
@@ -2092,7 +2179,7 @@ class AppUI {
     const promoGroups = this.promotionsContainer.querySelectorAll('.promo-group');
     const promotions = [];
     promoGroups.forEach(group => {
-      const name = group.querySelector('.promo-name').value.trim();
+      const name = this.getPromoGroupName(group);
       const payoutRows = group.querySelectorAll('.promo-payout-row');
       const payouts = [];
       payoutRows.forEach(row => {
@@ -2150,6 +2237,7 @@ class AppUI {
         <div>16회 해약환급금: <strong class="text-blue-600">+${result.surrender16.toLocaleString()}원</strong></div>
         <div>이 계약의 TP 지원금 증분: <strong class="text-emerald-600">+${result.tpBonusDiff.toLocaleString()}원</strong></div>
         ${result.healthBonusClawback > 0 ? `<div class="col-span-2">건강상해보너스 환수: <strong class="text-rose-600">-${result.healthBonusClawback.toLocaleString()}원</strong></div>` : ''}
+        ${result.generalPromoClawback > 0 ? `<div class="col-span-2">기타 프로모션 환수(13회차 이후 지급분): <strong class="text-rose-600">-${result.generalPromoClawback.toLocaleString()}원</strong></div>` : ''}
       </div>
       <div class="pt-1.5 border-t ${isGood ? 'border-emerald-200' : 'border-rose-200'} text-[11px] text-slate-600">
         이 계약 등록월 TP 문턱효과: 제외 시 ${result.otherTP.toLocaleString()}원(지원금 ${result.bonusWithout.toLocaleString()}원) → 포함 시 ${result.monthTP.toLocaleString()}원(지원금 ${result.bonusWith.toLocaleString()}원)
@@ -2169,7 +2257,7 @@ class AppUI {
     const promoGroups = this.promotionsContainer.querySelectorAll('.promo-group');
     const promotions = [];
     promoGroups.forEach(group => {
-      const name = group.querySelector('.promo-name').value.trim();
+      const name = this.getPromoGroupName(group);
       const payoutRows = group.querySelectorAll('.promo-payout-row');
       const payouts = [];
       payoutRows.forEach(row => {
@@ -2229,16 +2317,51 @@ class AppUI {
   }
 
   async deleteContract(id) {
-    if (confirm('해당 계약 항목을 삭제하시겠습니까?')) {
+    if (confirm('해당 계약 항목을 삭제하시겠습니까? (최근 삭제한 계약 3개까지는 다시 불러올 수 있습니다)')) {
+      const target = this.contracts.find(c => c.id === id);
       try {
         await ContractStore.deleteContractFromSupabase(id);
-        alert('데이터가 Supabase 에서 삭제되었습니다.');
+        if (target) {
+          this.recentlyDeleted.unshift(target);
+          if (this.recentlyDeleted.length > 3) this.recentlyDeleted.pop();
+        }
         this.contracts = await ContractStore.getContractsFromSupabase();
         this.renderAll();
       } catch (e) {
         alert('삭제 실패: ' + e.message);
       }
     }
+  }
+
+  // 최근 삭제 목록(최대 3개)에서 계약을 다시 불러와 재등록한다.
+  async restoreContract(index) {
+    const target = this.recentlyDeleted[index];
+    if (!target) return;
+    try {
+      const { id, createdAt, userId, ...restoreData } = target;
+      await ContractStore.addContractToSupabase(restoreData);
+      this.recentlyDeleted.splice(index, 1);
+      this.contracts = await ContractStore.getContractsFromSupabase();
+      this.renderAll();
+    } catch (e) {
+      alert('복원 실패: ' + e.message);
+    }
+  }
+
+  renderRecentlyDeleted() {
+    if (!this.recentlyDeletedBar) return;
+    if (this.recentlyDeleted.length === 0) {
+      this.recentlyDeletedBar.classList.add('hidden');
+      return;
+    }
+    this.recentlyDeletedBar.classList.remove('hidden');
+    this.recentlyDeletedList.innerHTML = this.recentlyDeleted.map((c, idx) => `
+      <button type="button" onclick="app.restoreContract(${idx})" class="inline-flex items-center gap-1.5 px-2.5 py-1 bg-white border border-amber-300 rounded-full text-amber-800 hover:bg-amber-100 transition" title="다시 불러오기">
+        <i data-lucide="rotate-ccw" class="w-3 h-3"></i>
+        ${c.title || c.client || '계약'} (${c.client || ''})
+      </button>
+    `).join('');
+    lucide.createIcons();
   }
 
 }
