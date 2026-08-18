@@ -271,10 +271,16 @@
         </div>
       </div>
 
-      <!-- Recently Deleted Restore Bar -->
-      <div id="recently-deleted-bar" class="hidden px-6 py-2.5 bg-amber-50 border-b border-amber-200 flex items-center gap-2 flex-wrap text-xs">
-        <span class="text-amber-700 font-semibold shrink-0">최근 삭제한 계약:</span>
-        <div id="recently-deleted-list" class="flex items-center gap-2 flex-wrap"></div>
+      <!-- Deleted Contracts: Toggle Button + Collapsible List -->
+      <div class="px-6 py-2 border-b border-slate-200 flex items-center justify-between">
+        <button id="btn-toggle-deleted-list" type="button" class="inline-flex items-center gap-1.5 text-xs text-slate-500 hover:text-slate-700 font-medium transition">
+          <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
+          <span id="deleted-list-toggle-label">삭제된 계약 목록</span>
+          <i data-lucide="chevron-down" class="w-3.5 h-3.5 transition-transform" id="deleted-list-chevron"></i>
+        </button>
+      </div>
+      <div id="deleted-contracts-panel" class="hidden px-6 py-3 bg-amber-50 border-b border-amber-200 space-y-1.5 text-xs">
+        <div id="deleted-contracts-list" class="space-y-1.5"></div>
       </div>
 
       <!-- Contract Table -->
