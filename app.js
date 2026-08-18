@@ -285,6 +285,21 @@ class ContractStore {
     if (error) throw error;
   }
 
+  // 완전 삭제: 소프트 삭제 목록에서 행 자체를 영구적으로 제거. 복원 불가능하므로 신중히 사용.
+  static async permanentlyDeleteContract(id) {
+    const user = await this.checkAuth();
+    if (!user) throw new Error('로그인이 필요합니다.');
+
+    const { error } = await window.supabase
+      .from('contracts')
+      .delete()
+      .eq('id', id)
+      .eq('user_id', user.id)
+      .eq('is_deleted', true); // 소프트 삭제 상태인 계약만 완전 삭제 가능 (안전장치)
+
+    if (error) throw error;
+  }
+
 }
 
 // --- GFC Advanced Financial Engine (Manual Club Tier Integration with 30 만 Club) ---
@@ -2409,6 +2424,18 @@ class AppUI {
     }
   }
 
+  // 삭제 목록에서 완전 삭제 (DB 행 자체를 영구 제거, 복원 불가)
+  async permanentlyDeleteContract(id) {
+    if (!confirm('이 계약을 완전히 삭제하시겠습니까? 이 작업은 되돌릴 수 없습니다.')) return;
+    try {
+      await ContractStore.permanentlyDeleteContract(id);
+      this.recentlyDeleted = await ContractStore.getRecentlyDeletedFromSupabase(10);
+      this.renderAll();
+    } catch (e) {
+      alert('완전 삭제 실패: ' + e.message);
+    }
+  }
+
   // 대시보드에는 열기/닫기 버튼만 노출하고, 클릭 시에만 삭제된 계약 리스트를 펼쳐서 보여준다.
   toggleDeletedContractsPanel() {
     const isHidden = this.deletedContractsPanel.classList.contains('hidden');
@@ -2442,9 +2469,14 @@ class AppUI {
             <p class="font-semibold text-slate-700 truncate">${c.title || '계약'} <span class="text-slate-400 font-normal">· ${c.client || ''}</span></p>
             <p class="text-[11px] text-slate-400">${c.company || ''} · 보험료 ${(Number(c.premium) || 0).toLocaleString()}원${deletedDateStr ? ' · 삭제일 ' + deletedDateStr : ''}</p>
           </div>
-          <button type="button" onclick="app.restoreContract('${c.id}')" class="shrink-0 inline-flex items-center gap-1.5 px-2.5 py-1 bg-amber-50 border border-amber-300 rounded-full text-amber-800 hover:bg-amber-100 transition" title="다시 불러오기">
-            <i data-lucide="rotate-ccw" class="w-3 h-3"></i> 복원
-          </button>
+          <div class="shrink-0 flex items-center gap-1.5">
+            <button type="button" onclick="app.restoreContract('${c.id}')" class="inline-flex items-center gap-1.5 px-2.5 py-1 bg-amber-50 border border-amber-300 rounded-full text-amber-800 hover:bg-amber-100 transition" title="다시 불러오기">
+              <i data-lucide="rotate-ccw" class="w-3 h-3"></i> 복원
+            </button>
+            <button type="button" onclick="app.permanentlyDeleteContract('${c.id}')" class="inline-flex items-center gap-1.5 px-2.5 py-1 bg-rose-50 border border-rose-300 rounded-full text-rose-700 hover:bg-rose-100 transition" title="완전 삭제 (복원 불가)">
+              <i data-lucide="x" class="w-3 h-3"></i> 완전삭제
+            </button>
+          </div>
         </div>
       `;
     }).join('');
