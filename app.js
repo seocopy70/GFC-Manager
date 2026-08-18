@@ -1039,6 +1039,11 @@ class AppUI {
 
     this.tbody = document.getElementById('contract-list-tbody');
     this.emptyState = document.getElementById('empty-state');
+    this.safetyRatioValue = document.getElementById('safety-ratio-value');
+    this.safetyRatioBadge = document.getElementById('safety-ratio-badge');
+    this.safetyRatioBar = document.getElementById('safety-ratio-bar');
+    this.safetyNewPremiumInput = document.getElementById('safety-new-premium');
+    this.safetyRecommendation = document.getElementById('safety-recommendation');
     this.btnToggleDeletedList = document.getElementById('btn-toggle-deleted-list');
     this.deletedListToggleLabel = document.getElementById('deleted-list-toggle-label');
     this.deletedListChevron = document.getElementById('deleted-list-chevron');
@@ -1287,6 +1292,7 @@ class AppUI {
 
     this.renderClubTierEstimate();
     this.renderKPIs();
+    this.renderSelfContractSafety();
     this.renderContractTable();
     this.renderSelfAnalysis();
     this.renderChart();
@@ -1333,6 +1339,62 @@ class AppUI {
     const netFormatted = `${currentMonth.netProfit >= 0 ? '+' : ''}${currentMonth.netProfit.toLocaleString()} 원`;
     this.kpiNetProfit.textContent = netFormatted;
     this.kpiNetProfit.className = `text-2xl font-extrabold mt-1 ${currentMonth.netProfit >= 0 ? 'text-slate-900' : 'text-rose-600'}`;
+  }
+
+  // 당월 총수입(수수료+프로모션+지원금) 대비 자기계약 보험료 지출 비율을 계산해 "안전선" 카드에 표시.
+  // 참고용 기준선: 10% 이하 안전 / 10~20% 주의 / 20% 초과 위험. 개인 고정지출·비상자금 여력에 따라 조정 필요.
+  renderSelfContractSafety() {
+    if (!this.safetyRatioValue) return;
+
+    const SAFE_THRESHOLD = 0.10;
+    const CAUTION_THRESHOLD = 0.20;
+
+    if (!this.settings.joinDate) {
+      this.safetyRatioValue.textContent = '0%';
+      this.safetyRatioBadge.textContent = '';
+      this.safetyRatioBar.style.width = '0%';
+      return;
+    }
+
+    const clubKey = this.selectClubTier.value || 'club_350';
+    const aggregated = GfcAdvancedEngine.calculateAggregatedCashflow(this.contracts, 1, this.settings.joinDate, clubKey, false);
+    const currentMonth = aggregated[0] || { totalIncome: 0, selfExpense: 0 };
+
+    const totalIncome = Math.max(0, currentMonth.totalIncome);
+    const selfExpense = Math.max(0, currentMonth.selfExpense);
+    const ratio = totalIncome > 0 ? (selfExpense / totalIncome) : (selfExpense > 0 ? 1 : 0);
+    const ratioPct = Math.round(ratio * 1000) / 10; // 소수 첫째자리까지
+
+    this.safetyRatioValue.textContent = `${ratioPct}%`;
+
+    let badgeLabel, badgeClass, barColor;
+    if (ratio <= SAFE_THRESHOLD) {
+      badgeLabel = '안전'; badgeClass = 'bg-emerald-50 text-emerald-700 border-emerald-200'; barColor = 'bg-emerald-500';
+    } else if (ratio <= CAUTION_THRESHOLD) {
+      badgeLabel = '주의'; badgeClass = 'bg-amber-50 text-amber-700 border-amber-200'; barColor = 'bg-amber-500';
+    } else {
+      badgeLabel = '위험'; badgeClass = 'bg-rose-50 text-rose-700 border-rose-200'; barColor = 'bg-rose-500';
+    }
+    this.safetyRatioBadge.textContent = badgeLabel;
+    this.safetyRatioBadge.className = `ml-2 inline-block text-[11px] px-2 py-0.5 rounded-full border align-middle ${badgeClass}`;
+    this.safetyRatioBar.style.width = `${Math.min(100, ratioPct)}%`;
+    this.safetyRatioBar.className = `h-full rounded-full transition-all duration-300 ${barColor}`;
+
+    // 신규 자기계약 추가 시뮬레이션: 위험선(20%)까지 남은 여유 보험료 ÷ 입력한 예상 월납 = 추가 가능 건수
+    if (!this.safetyRecommendation) return;
+    const newPremium = parseMoneyInput(this.safetyNewPremiumInput.value);
+    const headroom = Math.max(0, CAUTION_THRESHOLD * totalIncome - selfExpense);
+
+    if (totalIncome <= 0) {
+      this.safetyRecommendation.textContent = '진성계약 수당 데이터가 없어 계산할 수 없습니다. 진성계약을 먼저 등록해 주세요.';
+    } else if (newPremium <= 0) {
+      this.safetyRecommendation.textContent = `현재 위험선(20%)까지 여유 보험료는 월 ${Math.round(headroom).toLocaleString()}원입니다. 예상 월 보험료를 입력하면 추가 가능 건수를 계산해 드립니다.`;
+    } else {
+      const canAdd = Math.floor(headroom / newPremium);
+      this.safetyRecommendation.innerHTML = canAdd > 0
+        ? `월 ${newPremium.toLocaleString()}원짜리 자기계약을 <strong class="text-slate-800">최대 ${canAdd}건</strong>까지 추가해도 위험선(20%) 이내로 유지됩니다. (여유 보험료 ${Math.round(headroom).toLocaleString()}원)`
+        : `이미 위험선(20%)에 근접했거나 초과한 상태입니다. 이 금액대의 자기계약을 추가하면 비율이 20%를 넘습니다.`;
+    }
   }
 
   renderContractTable() {
