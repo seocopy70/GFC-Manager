@@ -1082,7 +1082,14 @@ class AppUI {
     this.btnOpenRulesModal.addEventListener('click', () => this.rulesModal.classList.remove('hidden'));
     this.btnCloseRulesModal.addEventListener('click', () => this.rulesModal.classList.add('hidden'));
 
-    this.btnCloseDetailModal.addEventListener('click', () => this.detailModal.classList.add('hidden'));
+    this.btnCloseDetailModal.addEventListener('click', () => this.closeDetailModal());
+
+    // 상세창이 열려 있을 때 모바일 뒤로가기(제스처/버튼)를 누르면 앱을 벗어나지 않고 상세창만 닫히도록 처리
+    window.addEventListener('popstate', () => {
+      if (!this.detailModal.classList.contains('hidden')) {
+        this.closeDetailModal(true);
+      }
+    });
 
     document.querySelectorAll('.rule-tab').forEach(tab => {
       tab.addEventListener('click', (e) => {
@@ -1574,6 +1581,21 @@ class AppUI {
     });
   }
 
+  // 상세창을 열면서, 뒤로가기(모바일 제스처/버튼)로 상세창만 닫을 수 있도록 history state를 하나 쌓는다.
+  showDetailModal() {
+    this.detailModal.classList.remove('hidden');
+    history.pushState({ appModal: 'detail' }, '');
+  }
+
+  // fromPopState가 true면 popstate 이벤트로 인해 이미 뒤로 이동한 상태이므로 history.back()을 다시 호출하지 않는다.
+  // (X 버튼 클릭 등 사용자가 직접 닫은 경우에는 쌓아둔 history state를 정리하기 위해 history.back()을 호출)
+  closeDetailModal(fromPopState = false) {
+    this.detailModal.classList.add('hidden');
+    if (!fromPopState && history.state && history.state.appModal === 'detail') {
+      history.back();
+    }
+  }
+
   openDetailModal(type) {
     const clubKey = this.selectClubTier.value || 'club_350';
     const horizon = Number(this.chartRangeSelect ? this.chartRangeSelect.value : 24) || 24;
@@ -1934,7 +1956,7 @@ class AppUI {
 
     this.detailModalTitle.textContent = title;
     this.detailModalBody.innerHTML = renderMonthDetail(pastMonths);
-    this.detailModal.classList.remove('hidden');
+    this.showDetailModal();
 
     // detail-month-selector는 매번 innerHTML로 새로 생성되므로, 사라지지 않는
     // 부모(detailModalBody)에 위임 방식으로 리스너를 걸어야 두 번째 이후 변경도 동작함
@@ -2032,7 +2054,7 @@ class AppUI {
 
     this.detailModalTitle.textContent = `자기계약 수지분석 상세 — ${c.title}`;
     this.detailModalBody.innerHTML = htmlContent;
-    this.detailModal.classList.remove('hidden');
+    this.showDetailModal();
     lucide.createIcons();
   }
 
