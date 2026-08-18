@@ -1044,6 +1044,8 @@ class AppUI {
     this.safetyRatioBar = document.getElementById('safety-ratio-bar');
     this.safetyNewPremiumInput = document.getElementById('safety-new-premium');
     this.safetyRecommendation = document.getElementById('safety-recommendation');
+    this.safetyChartRangeSelect = document.getElementById('safety-chart-range');
+    this.safetyChart = null;
     this.btnToggleDeletedList = document.getElementById('btn-toggle-deleted-list');
     this.deletedListToggleLabel = document.getElementById('deleted-list-toggle-label');
     this.deletedListChevron = document.getElementById('deleted-list-chevron');
@@ -1197,6 +1199,7 @@ class AppUI {
     });
 
     this.chartRangeSelect.addEventListener('change', () => this.renderChart());
+    this.safetyChartRangeSelect.addEventListener('change', () => this.renderSelfContractSafety());
   }
 
   async loadDataAndRender() {
@@ -1395,6 +1398,90 @@ class AppUI {
         ? `월 ${newPremium.toLocaleString()}원짜리 자기계약을 <strong class="text-slate-800">최대 ${canAdd}건</strong>까지 추가해도 위험선(20%) 이내로 유지됩니다. (여유 보험료 ${Math.round(headroom).toLocaleString()}원)`
         : `이미 위험선(20%)에 근접했거나 초과한 상태입니다. 이 금액대의 자기계약을 추가하면 비율이 20%를 넘습니다.`;
     }
+
+    this.renderSelfContractSafetyChart(clubKey, SAFE_THRESHOLD, CAUTION_THRESHOLD);
+  }
+
+  // 당월 비율은 스냅샷일 뿐, 자기계약이 겹치거나 해지 타이밍이 몰리면 몇 달 뒤 비율이 급등할 수 있다.
+  // 향후 12~24개월 구간의 월별 비율 추이를 선그래프로 보여줘 이런 변화를 미리 확인할 수 있게 한다.
+  renderSelfContractSafetyChart(clubKey, safeThreshold, cautionThreshold) {
+    const canvasEl = document.getElementById('safetyRatioChart');
+    if (!canvasEl || !this.settings.joinDate) return;
+
+    const horizon = Number(this.safetyChartRangeSelect.value) || 24;
+    const aggregated = GfcAdvancedEngine.calculateAggregatedCashflow(this.contracts, horizon, this.settings.joinDate, clubKey, false);
+
+    const labels = aggregated.map(d => d.monthLabel);
+    const ratios = aggregated.map(d => {
+      const income = Math.max(0, d.totalIncome);
+      const expense = Math.max(0, d.selfExpense);
+      const r = income > 0 ? (expense / income) : (expense > 0 ? 1 : 0);
+      return Math.round(r * 1000) / 10;
+    });
+    const safeLine = labels.map(() => safeThreshold * 100);
+    const cautionLine = labels.map(() => cautionThreshold * 100);
+
+    const ctx = canvasEl.getContext('2d');
+    if (this.safetyChart) this.safetyChart.destroy();
+
+    this.safetyChart = new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels: labels,
+        datasets: [
+          {
+            label: '자기계약 지출 비율 (%)',
+            data: ratios,
+            borderColor: '#4f46e5',
+            backgroundColor: 'rgba(79,70,229,0.08)',
+            borderWidth: 2,
+            pointRadius: 2,
+            fill: true,
+            tension: 0.3
+          },
+          {
+            label: '주의선 (10%)',
+            data: safeLine,
+            borderColor: '#f59e0b',
+            borderWidth: 1,
+            borderDash: [4, 4],
+            pointRadius: 0,
+            fill: false
+          },
+          {
+            label: '위험선 (20%)',
+            data: cautionLine,
+            borderColor: '#e11d48',
+            borderWidth: 1,
+            borderDash: [4, 4],
+            pointRadius: 0,
+            fill: false
+          }
+        ]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: {
+            position: 'top',
+            labels: { boxWidth: 10, font: { size: 10, family: 'Noto Sans KR' } }
+          },
+          tooltip: {
+            callbacks: {
+              label: (item) => `${item.dataset.label}: ${item.formattedValue}%`
+            }
+          }
+        },
+        scales: {
+          x: { ticks: { font: { size: 9 }, maxRotation: 0, autoSkip: true } },
+          y: {
+            beginAtZero: true,
+            ticks: { font: { size: 9 }, callback: (v) => `${v}%` }
+          }
+        }
+      }
+    });
   }
 
   renderContractTable() {
