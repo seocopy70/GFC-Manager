@@ -268,17 +268,16 @@
             <button class="filter-tab px-3 py-1.5 rounded-md transition text-slate-600 hover:text-slate-900" data-filter="진성계약">진성계약</button>
             <button class="filter-tab px-3 py-1.5 rounded-md transition text-slate-600 hover:text-slate-900" data-filter="자기계약">자기계약</button>
           </div>
+
+          <!-- Deleted Contracts Toggle (같은 줄에 배치) -->
+          <button id="btn-toggle-deleted-list" type="button" class="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 rounded-lg text-xs font-medium text-slate-600 hover:text-slate-900 transition">
+            <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
+            <span id="deleted-list-toggle-label">삭제된 계약</span>
+            <i data-lucide="chevron-down" class="w-3.5 h-3.5 transition-transform" id="deleted-list-chevron"></i>
+          </button>
         </div>
       </div>
 
-      <!-- Deleted Contracts: Toggle Button + Collapsible List -->
-      <div class="px-6 py-2 border-b border-slate-200 flex items-center justify-between">
-        <button id="btn-toggle-deleted-list" type="button" class="inline-flex items-center gap-1.5 text-xs text-slate-500 hover:text-slate-700 font-medium transition">
-          <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
-          <span id="deleted-list-toggle-label">삭제된 계약 목록</span>
-          <i data-lucide="chevron-down" class="w-3.5 h-3.5 transition-transform" id="deleted-list-chevron"></i>
-        </button>
-      </div>
       <div id="deleted-contracts-panel" class="hidden px-6 py-3 bg-amber-50 border-b border-amber-200 space-y-1.5 text-xs">
         <div id="deleted-contracts-list" class="space-y-1.5"></div>
       </div>
