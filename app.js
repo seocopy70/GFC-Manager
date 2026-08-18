@@ -2420,7 +2420,7 @@ class AppUI {
   renderRecentlyDeleted() {
     if (!this.deletedListToggleLabel) return;
     const count = this.recentlyDeleted.length;
-    this.deletedListToggleLabel.textContent = count > 0 ? `삭제된 계약 목록 (${count})` : '삭제된 계약 목록';
+    this.deletedListToggleLabel.textContent = count > 0 ? `삭제된 계약 (${count})` : '삭제된 계약';
     // 패널이 열려 있는 상태라면 목록 내용도 즉시 갱신
     if (this.deletedContractsPanel && !this.deletedContractsPanel.classList.contains('hidden')) {
       this.renderDeletedContractsList();
