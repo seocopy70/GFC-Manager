@@ -2433,6 +2433,27 @@ class AppUI {
       return;
     }
 
+    // 이 계약을 추가했을 때 "당월 자기계약 안전선" 비율이 어떻게 바뀌는지도 함께 계산 (renderSelfContractSafety와 동일한 기준선 사용)
+    const clubKeyForSafety = this.selectClubTier.value || 'club_350';
+    const scheduleCandidate = { ...candidate, contractType: '자기계약', status: '정상유지' };
+    const contractsWithoutCandidate = this.contracts.filter(c => c.id !== editingId);
+    const contractsWithCandidate = [...contractsWithoutCandidate, scheduleCandidate];
+    const beforeAgg = GfcAdvancedEngine.calculateAggregatedCashflow(contractsWithoutCandidate, 1, this.settings.joinDate, clubKeyForSafety, false)[0] || { totalIncome: 0, selfExpense: 0 };
+    const afterAgg = GfcAdvancedEngine.calculateAggregatedCashflow(contractsWithCandidate, 1, this.settings.joinDate, clubKeyForSafety, false)[0] || { totalIncome: 0, selfExpense: 0 };
+    const ratioOf = (agg) => {
+      const income = Math.max(0, agg.totalIncome);
+      const expense = Math.max(0, agg.selfExpense);
+      return income > 0 ? (expense / income) : (expense > 0 ? 1 : 0);
+    };
+    const SAFE_T = 0.10, CAUTION_T = 0.20;
+    const beforeRatio = ratioOf(beforeAgg);
+    const afterRatio = ratioOf(afterAgg);
+    const labelOf = (r) => (r <= SAFE_T ? '안전' : (r <= CAUTION_T ? '주의' : '위험'));
+    const colorOf = (r) => (r <= SAFE_T ? 'text-emerald-700' : (r <= CAUTION_T ? 'text-amber-700' : 'text-rose-700'));
+    const beforePct = Math.round(beforeRatio * 1000) / 10;
+    const afterPct = Math.round(afterRatio * 1000) / 10;
+    const worsened = labelOf(afterRatio) !== labelOf(beforeRatio) && afterRatio > beforeRatio;
+
     const isGood = result.verdict === 'good';
     // 30만 기준선 또는 현재 Club 등급 유지에 필수적인 계약이면, 단순 금액 손익과 별개로 강조 표시
     const isCritical = result.essentialFor30 || result.essentialForCurrentClub || result.crossedTiers.length > 0;
@@ -2473,6 +2494,13 @@ class AppUI {
       </div>
       <div class="pt-1.5 border-t ${isGood ? 'border-emerald-200' : 'border-rose-200'} text-[11px] text-slate-600">
         이 계약 등록월 TP 문턱효과: 제외 시 ${result.otherTP.toLocaleString()}원(지원금 ${result.bonusWithout.toLocaleString()}원) → 포함 시 ${result.monthTP.toLocaleString()}원(지원금 ${result.bonusWith.toLocaleString()}원)
+      </div>
+      <div class="pt-1.5 border-t ${isGood ? 'border-emerald-200' : 'border-rose-200'} text-[11px] text-slate-700 space-y-1">
+        <div class="flex items-center justify-between gap-2">
+          <span>당월 자기계약 안전선 영향</span>
+          <span>${beforePct}% (${labelOf(beforeRatio)}) → <strong class="${colorOf(afterRatio)}">${afterPct}% (${labelOf(afterRatio)})</strong></span>
+        </div>
+        ${worsened ? `<div class="p-2 rounded-lg bg-rose-100 border border-rose-300 text-rose-800 text-[11px] font-semibold flex items-center gap-1.5"><i data-lucide="alert-triangle" class="w-3.5 h-3.5 shrink-0"></i>이 계약을 추가하면 안전선 등급이 '${labelOf(beforeRatio)}'에서 '${labelOf(afterRatio)}'(으)로 나빠집니다.</div>` : ''}
       </div>
     `;
     lucide.createIcons();
