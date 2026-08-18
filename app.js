@@ -1388,7 +1388,8 @@ class AppUI {
       const totalIncomeNet = (totalComm + totalPromoCalc) * (1 - 0.008);
       const totalExpense15 = premium * 15;
       const healthBonusClawback = GfcAdvancedEngine.calculateHealthBonusClawback(c, 15);
-      const netProfitAt16 = totalIncomeNet + surrender16 - totalExpense15 + tpBonusDiff - healthBonusClawback;
+      const generalPromoClawback = GfcAdvancedEngine.calculateGeneralPromoClawback(c, 15);
+      const netProfitAt16 = totalIncomeNet + surrender16 - totalExpense15 + tpBonusDiff - healthBonusClawback - generalPromoClawback;
 
       return `
         <div onclick="app.openSelfContractDetail('${c.id}')" class="p-5 bg-slate-50 rounded-xl border border-slate-200 text-sm cursor-pointer hover:border-emerald-500 hover:shadow-md transition group flex items-center justify-between gap-3" title="클릭하여 상세 수지분석 보기">
