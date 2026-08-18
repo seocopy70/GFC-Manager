@@ -155,7 +155,7 @@ class ContractStore {
   }
 
   // 최근 소프트 삭제한 계약 목록 (다시 불러오기 UI용, DB에 영구 보관되므로 세션/새로고침과 무관하게 유지)
-  static async getRecentlyDeletedFromSupabase(limit = 3) {
+  static async getRecentlyDeletedFromSupabase(limit = 10) {
     const user = await this.checkAuth();
     if (!user) return [];
 
@@ -1196,7 +1196,7 @@ class AppUI {
     try {
       this.settings = await ContractStore.getSettings();
       this.contracts = await ContractStore.getContractsFromSupabase();
-      this.recentlyDeleted = await ContractStore.getRecentlyDeletedFromSupabase(3);
+      this.recentlyDeleted = await ContractStore.getRecentlyDeletedFromSupabase(10);
     } catch (e) {
       console.error('데이터 로드 실패:', e);
     }
@@ -2362,7 +2362,7 @@ class AppUI {
       try {
         await ContractStore.deleteContractFromSupabase(id);
         this.contracts = await ContractStore.getContractsFromSupabase();
-        this.recentlyDeleted = await ContractStore.getRecentlyDeletedFromSupabase(3);
+        this.recentlyDeleted = await ContractStore.getRecentlyDeletedFromSupabase(10);
         this.renderAll();
       } catch (e) {
         alert('삭제 실패: ' + e.message);
@@ -2370,12 +2370,12 @@ class AppUI {
     }
   }
 
-  // 최근 삭제 목록(최대 3개, DB 조회)에서 계약을 원래 상태로 복원한다.
+  // 최근 삭제 목록(최대 10개, DB 조회)에서 계약을 원래 상태로 복원한다.
   async restoreContract(id) {
     try {
       await ContractStore.restoreContractInSupabase(id);
       this.contracts = await ContractStore.getContractsFromSupabase();
-      this.recentlyDeleted = await ContractStore.getRecentlyDeletedFromSupabase(3);
+      this.recentlyDeleted = await ContractStore.getRecentlyDeletedFromSupabase(10);
       this.renderAll();
     } catch (e) {
       alert('복원 실패: ' + e.message);
