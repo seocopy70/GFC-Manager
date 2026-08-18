@@ -1024,8 +1024,11 @@ class AppUI {
 
     this.tbody = document.getElementById('contract-list-tbody');
     this.emptyState = document.getElementById('empty-state');
-    this.recentlyDeletedBar = document.getElementById('recently-deleted-bar');
-    this.recentlyDeletedList = document.getElementById('recently-deleted-list');
+    this.btnToggleDeletedList = document.getElementById('btn-toggle-deleted-list');
+    this.deletedListToggleLabel = document.getElementById('deleted-list-toggle-label');
+    this.deletedListChevron = document.getElementById('deleted-list-chevron');
+    this.deletedContractsPanel = document.getElementById('deleted-contracts-panel');
+    this.deletedContractsList = document.getElementById('deleted-contracts-list');
     this.searchInput = document.getElementById('search-input');
     this.chartRangeSelect = document.getElementById('chart-range');
     this.selfAnalysisContainer = document.getElementById('self-contract-analysis');
@@ -1078,6 +1081,8 @@ class AppUI {
     this.btnCloseModal.addEventListener('click', () => this.closeModal());
     this.btnCancelModal.addEventListener('click', () => this.closeModal());
     this.btnAddPromo.addEventListener('click', () => this.addPromoGroup());
+
+    this.btnToggleDeletedList.addEventListener('click', () => this.toggleDeletedContractsPanel());
 
     this.btnOpenRulesModal.addEventListener('click', () => this.rulesModal.classList.remove('hidden'));
     this.btnCloseRulesModal.addEventListener('click', () => this.rulesModal.classList.add('hidden'));
@@ -2404,19 +2409,45 @@ class AppUI {
     }
   }
 
+  // 대시보드에는 열기/닫기 버튼만 노출하고, 클릭 시에만 삭제된 계약 리스트를 펼쳐서 보여준다.
+  toggleDeletedContractsPanel() {
+    const isHidden = this.deletedContractsPanel.classList.contains('hidden');
+    this.deletedContractsPanel.classList.toggle('hidden');
+    this.deletedListChevron.classList.toggle('rotate-180', isHidden);
+    if (isHidden) this.renderDeletedContractsList();
+  }
+
   renderRecentlyDeleted() {
-    if (!this.recentlyDeletedBar) return;
+    if (!this.deletedListToggleLabel) return;
+    const count = this.recentlyDeleted.length;
+    this.deletedListToggleLabel.textContent = count > 0 ? `삭제된 계약 목록 (${count})` : '삭제된 계약 목록';
+    // 패널이 열려 있는 상태라면 목록 내용도 즉시 갱신
+    if (this.deletedContractsPanel && !this.deletedContractsPanel.classList.contains('hidden')) {
+      this.renderDeletedContractsList();
+    }
+  }
+
+  renderDeletedContractsList() {
+    if (!this.deletedContractsList) return;
     if (this.recentlyDeleted.length === 0) {
-      this.recentlyDeletedBar.classList.add('hidden');
+      this.deletedContractsList.innerHTML = `<p class="text-slate-400 text-center py-2">삭제된 계약이 없습니다.</p>`;
+      lucide.createIcons();
       return;
     }
-    this.recentlyDeletedBar.classList.remove('hidden');
-    this.recentlyDeletedList.innerHTML = this.recentlyDeleted.map(c => `
-      <button type="button" onclick="app.restoreContract('${c.id}')" class="inline-flex items-center gap-1.5 px-2.5 py-1 bg-white border border-amber-300 rounded-full text-amber-800 hover:bg-amber-100 transition" title="다시 불러오기">
-        <i data-lucide="rotate-ccw" class="w-3 h-3"></i>
-        ${c.title || c.client || '계약'} (${c.client || ''})
-      </button>
-    `).join('');
+    this.deletedContractsList.innerHTML = this.recentlyDeleted.map(c => {
+      const deletedDateStr = c.deletedAt ? new Date(c.deletedAt).toLocaleDateString('ko-KR') : '';
+      return `
+        <div class="flex items-center justify-between gap-3 px-3 py-2 bg-white border border-amber-200 rounded-lg">
+          <div class="min-w-0">
+            <p class="font-semibold text-slate-700 truncate">${c.title || '계약'} <span class="text-slate-400 font-normal">· ${c.client || ''}</span></p>
+            <p class="text-[11px] text-slate-400">${c.company || ''} · 보험료 ${(Number(c.premium) || 0).toLocaleString()}원${deletedDateStr ? ' · 삭제일 ' + deletedDateStr : ''}</p>
+          </div>
+          <button type="button" onclick="app.restoreContract('${c.id}')" class="shrink-0 inline-flex items-center gap-1.5 px-2.5 py-1 bg-amber-50 border border-amber-300 rounded-full text-amber-800 hover:bg-amber-100 transition" title="다시 불러오기">
+            <i data-lucide="rotate-ccw" class="w-3 h-3"></i> 복원
+          </button>
+        </div>
+      `;
+    }).join('');
     lucide.createIcons();
   }
 
