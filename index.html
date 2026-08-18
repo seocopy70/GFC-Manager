@@ -196,6 +196,36 @@
       </div>
     </section>
 
+    <!-- Self-Contract Safety Ratio -->
+    <section class="glass-card p-5 rounded-2xl border border-slate-200/80 shadow-sm">
+      <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-3">
+        <div>
+          <h2 class="text-sm font-bold text-slate-800 flex items-center gap-2">
+            <i data-lucide="gauge" class="w-4 h-4 text-indigo-500"></i>
+            자기계약 안전선 (당월 수입 대비 자기계약 지출 비율)
+          </h2>
+          <p class="text-[11px] text-slate-500">당월 총수입(수수료+프로모션+지원금) 대비 자기계약 보험료 지출 비중이 커질수록, 수당 지급 지연이나 신계약 감소 시 현금흐름 부담이 커집니다.</p>
+        </div>
+        <div class="text-right shrink-0">
+          <span id="safety-ratio-value" class="text-2xl font-extrabold text-slate-900">0%</span>
+          <span id="safety-ratio-badge" class="ml-2 inline-block text-[11px] px-2 py-0.5 rounded-full border align-middle"></span>
+        </div>
+      </div>
+      <div class="w-full h-2 bg-slate-100 rounded-full overflow-hidden mb-1">
+        <div id="safety-ratio-bar" class="h-full rounded-full transition-all duration-300" style="width:0%"></div>
+      </div>
+      <p class="text-[10px] text-slate-400 mb-3">기준: 10% 이하 안전 · 10~20% 주의 · 20% 초과 위험 (참고용 기준선이며 개인 상황에 따라 조정하세요)</p>
+      <div class="flex flex-wrap items-end gap-3 text-xs border-t border-slate-100 pt-3">
+        <div>
+          <label class="block text-slate-500 mb-1">신규 자기계약 예상 월 보험료</label>
+          <input type="text" inputmode="numeric" id="safety-new-premium" placeholder="예: 200,000" class="px-2 py-1.5 bg-slate-50 border border-slate-300 rounded-lg w-40 focus:ring-2 focus:ring-emerald-500 focus:outline-none" oninput="formatMoneyInput(this); app.renderSelfContractSafety();">
+        </div>
+        <div class="text-slate-600 flex-1 min-w-[200px]" id="safety-recommendation">
+          예상 월 보험료를 입력하면 위 안전선(20%) 기준으로 몇 건까지 추가 가능한지 계산해 드립니다.
+        </div>
+      </div>
+    </section>
+
     <!-- Cashflow Projection Chart & Self-Contract Flow Tab -->
     <section class="grid grid-cols-1 lg:grid-cols-3 gap-6">
       <!-- Main Chart (2 cols) with Tabs -->
