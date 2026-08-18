@@ -130,11 +130,13 @@ class ContractStore {
       tp: row.tp,
       surrenderValue16: row.surrender_value_16,
       promotions: row.promotions || [],
-      memo: row.memo
+      memo: row.memo,
+      isDeleted: !!row.is_deleted,
+      deletedAt: row.deleted_at
     };
   }
 
-  // Supabase 연동 메서드 (사용자별 데이터 필터링)
+  // Supabase 연동 메서드 (사용자별 데이터 필터링, 소프트 삭제된 계약은 제외)
   static async getContractsFromSupabase() {
     const user = await this.checkAuth();
     if (!user) return [];
@@ -142,10 +144,31 @@ class ContractStore {
     const { data, error } = await window.supabase
       .from('contracts')
       .select('*')
-      .eq('user_id', user.id);
+      .eq('user_id', user.id)
+      .eq('is_deleted', false);
     
     if (error) {
       console.error('Supabase 데이터 로드 에러:', error);
+      return [];
+    }
+    return (data || []).map(row => this.mapFromDb(row));
+  }
+
+  // 최근 소프트 삭제한 계약 목록 (다시 불러오기 UI용, DB에 영구 보관되므로 세션/새로고침과 무관하게 유지)
+  static async getRecentlyDeletedFromSupabase(limit = 3) {
+    const user = await this.checkAuth();
+    if (!user) return [];
+
+    const { data, error } = await window.supabase
+      .from('contracts')
+      .select('*')
+      .eq('user_id', user.id)
+      .eq('is_deleted', true)
+      .order('deleted_at', { ascending: false })
+      .limit(limit);
+
+    if (error) {
+      console.error('삭제된 계약 목록 로드 에러:', error);
       return [];
     }
     return (data || []).map(row => this.mapFromDb(row));
@@ -233,16 +256,32 @@ class ContractStore {
     return this.mapFromDb(data[0]);
   }
 
+  // 소프트 삭제: 실제로 행을 지우지 않고 is_deleted/deleted_at만 표시.
+  // DB에는 그대로 남아있으므로 대시보드·계산 로직에서만 제외되고, 이후 언제든 restoreContractInSupabase로 복원 가능.
   static async deleteContractFromSupabase(id) {
     const user = await this.checkAuth();
     if (!user) throw new Error('로그인이 필요합니다.');
-    
+
     const { error } = await window.supabase
       .from('contracts')
-      .delete()
+      .update({ is_deleted: true, deleted_at: new Date().toISOString() })
       .eq('id', id)
       .eq('user_id', user.id);
-    
+
+    if (error) throw error;
+  }
+
+  // 소프트 삭제된 계약을 원래 상태로 복원 (같은 id 그대로 되살림)
+  static async restoreContractInSupabase(id) {
+    const user = await this.checkAuth();
+    if (!user) throw new Error('로그인이 필요합니다.');
+
+    const { error } = await window.supabase
+      .from('contracts')
+      .update({ is_deleted: false, deleted_at: null })
+      .eq('id', id)
+      .eq('user_id', user.id);
+
     if (error) throw error;
   }
 
@@ -955,7 +994,7 @@ class GfcAdvancedEngine {
 class AppUI {
   constructor() {
     this.contracts = [];
-    this.recentlyDeleted = []; // 최근 삭제한 계약 최대 3개 (다시 불러오기용, 세션 한정)
+    this.recentlyDeleted = []; // 최근 소프트 삭제한 계약 (DB에서 최대 3건 조회, 다시 불러오기용)
     this.chart = null;
     this.currentFilter = 'all';
     this.searchTerm = '';
@@ -1157,6 +1196,7 @@ class AppUI {
     try {
       this.settings = await ContractStore.getSettings();
       this.contracts = await ContractStore.getContractsFromSupabase();
+      this.recentlyDeleted = await ContractStore.getRecentlyDeletedFromSupabase(3);
     } catch (e) {
       console.error('데이터 로드 실패:', e);
     }
@@ -2318,15 +2358,11 @@ class AppUI {
   }
 
   async deleteContract(id) {
-    if (confirm('해당 계약 항목을 삭제하시겠습니까? (최근 삭제한 계약 3개까지는 다시 불러올 수 있습니다)')) {
-      const target = this.contracts.find(c => c.id === id);
+    if (confirm('해당 계약 항목을 삭제하시겠습니까? (DB에는 보관되며, 최근 삭제 3건까지는 다시 불러올 수 있습니다)')) {
       try {
         await ContractStore.deleteContractFromSupabase(id);
-        if (target) {
-          this.recentlyDeleted.unshift(target);
-          if (this.recentlyDeleted.length > 3) this.recentlyDeleted.pop();
-        }
         this.contracts = await ContractStore.getContractsFromSupabase();
+        this.recentlyDeleted = await ContractStore.getRecentlyDeletedFromSupabase(3);
         this.renderAll();
       } catch (e) {
         alert('삭제 실패: ' + e.message);
@@ -2334,15 +2370,12 @@ class AppUI {
     }
   }
 
-  // 최근 삭제 목록(최대 3개)에서 계약을 다시 불러와 재등록한다.
-  async restoreContract(index) {
-    const target = this.recentlyDeleted[index];
-    if (!target) return;
+  // 최근 삭제 목록(최대 3개, DB 조회)에서 계약을 원래 상태로 복원한다.
+  async restoreContract(id) {
     try {
-      const { id, createdAt, userId, ...restoreData } = target;
-      await ContractStore.addContractToSupabase(restoreData);
-      this.recentlyDeleted.splice(index, 1);
+      await ContractStore.restoreContractInSupabase(id);
       this.contracts = await ContractStore.getContractsFromSupabase();
+      this.recentlyDeleted = await ContractStore.getRecentlyDeletedFromSupabase(3);
       this.renderAll();
     } catch (e) {
       alert('복원 실패: ' + e.message);
@@ -2356,8 +2389,8 @@ class AppUI {
       return;
     }
     this.recentlyDeletedBar.classList.remove('hidden');
-    this.recentlyDeletedList.innerHTML = this.recentlyDeleted.map((c, idx) => `
-      <button type="button" onclick="app.restoreContract(${idx})" class="inline-flex items-center gap-1.5 px-2.5 py-1 bg-white border border-amber-300 rounded-full text-amber-800 hover:bg-amber-100 transition" title="다시 불러오기">
+    this.recentlyDeletedList.innerHTML = this.recentlyDeleted.map(c => `
+      <button type="button" onclick="app.restoreContract('${c.id}')" class="inline-flex items-center gap-1.5 px-2.5 py-1 bg-white border border-amber-300 rounded-full text-amber-800 hover:bg-amber-100 transition" title="다시 불러오기">
         <i data-lucide="rotate-ccw" class="w-3 h-3"></i>
         ${c.title || c.client || '계약'} (${c.client || ''})
       </button>
