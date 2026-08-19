@@ -221,6 +221,78 @@
         </div>
       </div>
 
+      <!-- Monthly Income/Expense/Net Mini Summary (1 col, next to chart) -->
+      <div class="glass-card p-5 rounded-2xl border border-slate-200/80 shadow-sm flex flex-col">
+        <div class="border-b border-slate-100 pb-2 mb-1">
+          <h2 class="text-sm font-bold text-slate-800 flex items-center gap-2">
+            <i data-lucide="wallet" class="w-4 h-4 text-blue-500"></i>
+            당월 수지 요약
+          </h2>
+          <p class="text-[11px] text-slate-500">이번 달 수입·지출·순손익 한눈에 보기</p>
+        </div>
+        <div class="divide-y divide-slate-100 flex-1 flex flex-col justify-center">
+          <div class="flex items-center justify-between py-3">
+            <span class="text-xs font-semibold text-slate-500">당월 수입</span>
+            <span class="text-lg font-extrabold text-emerald-600" id="kpi-mini-income">0 원</span>
+          </div>
+          <div class="flex items-center justify-between py-3">
+            <span class="text-xs font-semibold text-slate-500">당월 지출</span>
+            <span class="text-lg font-extrabold text-rose-600" id="kpi-mini-expense">0 원</span>
+          </div>
+          <div class="flex items-center justify-between py-3">
+            <span class="text-xs font-semibold text-slate-500">당월 순손익</span>
+            <span class="text-lg font-extrabold text-slate-900" id="kpi-mini-net">0 원</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Self-Contract Safety Ratio & 16th Month Surrender Analysis -->
+    <section class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <!-- Self-Contract Safety Ratio (2 cols) -->
+      <div class="lg:col-span-2 glass-card p-5 rounded-2xl border border-slate-200/80 shadow-sm">
+        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-3">
+          <div>
+            <h2 class="text-sm font-bold text-slate-800 flex items-center gap-2">
+              <i data-lucide="gauge" class="w-4 h-4 text-indigo-500"></i>
+              <span id="safety-ratio-label">자기계약 안전선</span>
+            </h2>
+            <p class="text-[11px] text-slate-500">특정 한 달만 보면 전월에 큰 계약이 몰려 들어와 비율이 왜곡될 수 있어, 최근 최대 12개월 평균 수입 대비 평균 자기계약 지출 비중으로 판단합니다.</p>
+          </div>
+          <div class="text-right shrink-0">
+            <span id="safety-ratio-value" class="text-2xl font-extrabold text-slate-900">0%</span>
+            <span id="safety-ratio-badge" class="ml-2 inline-block text-[11px] px-2 py-0.5 rounded-full border align-middle"></span>
+          </div>
+        </div>
+        <div class="w-full h-2 bg-slate-100 rounded-full overflow-hidden mb-1">
+          <div id="safety-ratio-bar" class="h-full rounded-full transition-all duration-300" style="width:0%"></div>
+        </div>
+        <p class="text-[10px] text-slate-400 mb-3" id="safety-threshold-note">기준: 10% 이하 안전 · 10~20% 주의 · 20% 초과 위험 (참고용 기준선이며 개인 상황에 따라 조정하세요)</p>
+        <div class="flex flex-wrap items-end gap-3 text-xs border-t border-slate-100 pt-3 pb-4 mb-1">
+          <div>
+            <label class="block text-slate-500 mb-1">신규 자기계약 예상 월 보험료</label>
+            <input type="text" inputmode="numeric" id="safety-new-premium" placeholder="예: 200,000" class="px-2 py-1.5 bg-slate-50 border border-slate-300 rounded-lg w-40 focus:ring-2 focus:ring-emerald-500 focus:outline-none" oninput="formatMoneyInput(this); app.renderSelfContractSafety();">
+          </div>
+          <div class="text-slate-600 flex-1 min-w-[200px]" id="safety-recommendation">
+            예상 월 보험료를 입력하면 위 안전선(20%) 기준으로 몇 건까지 추가 가능한지 계산해 드립니다.
+          </div>
+        </div>
+
+        <!-- Forward-looking ratio trend -->
+        <div class="border-t border-slate-100 pt-3">
+          <div class="flex items-center justify-between mb-2">
+            <p class="text-xs font-semibold text-slate-600">향후 비율 추이</p>
+            <select id="safety-chart-range" class="text-[11px] bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 font-medium text-slate-700 focus:ring-2 focus:ring-emerald-500 focus:outline-none">
+              <option value="12">향후 12개월</option>
+              <option value="24" selected>향후 24개월</option>
+            </select>
+          </div>
+          <div class="h-48 relative w-full">
+            <canvas id="safetyRatioChart"></canvas>
+          </div>
+        </div>
+      </div>
+
       <!-- Self Contract 16th Month Surrender Analysis (1 col) -->
       <div class="glass-card p-5 rounded-2xl border border-slate-200/80 shadow-sm flex flex-col justify-between space-y-3">
         <div>
@@ -240,50 +312,6 @@
           </div>
         </div>
 
-      </div>
-    </section>
-
-    <!-- Self-Contract Safety Ratio -->
-    <section class="glass-card p-5 rounded-2xl border border-slate-200/80 shadow-sm">
-      <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-3">
-        <div>
-          <h2 class="text-sm font-bold text-slate-800 flex items-center gap-2">
-            <i data-lucide="gauge" class="w-4 h-4 text-indigo-500"></i>
-            <span id="safety-ratio-label">자기계약 안전선</span>
-          </h2>
-          <p class="text-[11px] text-slate-500">특정 한 달만 보면 전월에 큰 계약이 몰려 들어와 비율이 왜곡될 수 있어, 최근 최대 12개월 평균 수입 대비 평균 자기계약 지출 비중으로 판단합니다.</p>
-        </div>
-        <div class="text-right shrink-0">
-          <span id="safety-ratio-value" class="text-2xl font-extrabold text-slate-900">0%</span>
-          <span id="safety-ratio-badge" class="ml-2 inline-block text-[11px] px-2 py-0.5 rounded-full border align-middle"></span>
-        </div>
-      </div>
-      <div class="w-full h-2 bg-slate-100 rounded-full overflow-hidden mb-1">
-        <div id="safety-ratio-bar" class="h-full rounded-full transition-all duration-300" style="width:0%"></div>
-      </div>
-      <p class="text-[10px] text-slate-400 mb-3" id="safety-threshold-note">기준: 10% 이하 안전 · 10~20% 주의 · 20% 초과 위험 (참고용 기준선이며 개인 상황에 따라 조정하세요)</p>
-      <div class="flex flex-wrap items-end gap-3 text-xs border-t border-slate-100 pt-3 pb-4 mb-1">
-        <div>
-          <label class="block text-slate-500 mb-1">신규 자기계약 예상 월 보험료</label>
-          <input type="text" inputmode="numeric" id="safety-new-premium" placeholder="예: 200,000" class="px-2 py-1.5 bg-slate-50 border border-slate-300 rounded-lg w-40 focus:ring-2 focus:ring-emerald-500 focus:outline-none" oninput="formatMoneyInput(this); app.renderSelfContractSafety();">
-        </div>
-        <div class="text-slate-600 flex-1 min-w-[200px]" id="safety-recommendation">
-          예상 월 보험료를 입력하면 위 안전선(20%) 기준으로 몇 건까지 추가 가능한지 계산해 드립니다.
-        </div>
-      </div>
-
-      <!-- Forward-looking ratio trend -->
-      <div class="border-t border-slate-100 pt-3">
-        <div class="flex items-center justify-between mb-2">
-          <p class="text-xs font-semibold text-slate-600">향후 비율 추이</p>
-          <select id="safety-chart-range" class="text-[11px] bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 font-medium text-slate-700 focus:ring-2 focus:ring-emerald-500 focus:outline-none">
-            <option value="12">향후 12개월</option>
-            <option value="24" selected>향후 24개월</option>
-          </select>
-        </div>
-        <div class="h-48 relative w-full">
-          <canvas id="safetyRatioChart"></canvas>
-        </div>
       </div>
     </section>
 
