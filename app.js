@@ -1075,6 +1075,9 @@ class AppUI {
     this.kpiRealIncome = document.getElementById('kpi-real-income');
     this.kpiSelfExpense = document.getElementById('kpi-self-expense');
     this.kpiNetProfit = document.getElementById('kpi-net-profit');
+    this.kpiMiniIncome = document.getElementById('kpi-mini-income');
+    this.kpiMiniExpense = document.getElementById('kpi-mini-expense');
+    this.kpiMiniNet = document.getElementById('kpi-mini-net');
 
     this.tbody = document.getElementById('contract-list-tbody');
     this.emptyState = document.getElementById('empty-state');
@@ -1366,6 +1369,12 @@ class AppUI {
       this.kpiSelfExpense.textContent = '0 원';
       this.kpiNetProfit.textContent = '0 원';
       this.kpiNetProfit.className = 'text-2xl font-extrabold mt-1 text-slate-900';
+      if (this.kpiMiniIncome) this.kpiMiniIncome.textContent = '0 원';
+      if (this.kpiMiniExpense) this.kpiMiniExpense.textContent = '0 원';
+      if (this.kpiMiniNet) {
+        this.kpiMiniNet.textContent = '0 원';
+        this.kpiMiniNet.className = 'text-lg font-extrabold text-slate-900';
+      }
       return;
     }
 
@@ -1382,6 +1391,13 @@ class AppUI {
     const netFormatted = `${currentMonth.netProfit >= 0 ? '+' : ''}${currentMonth.netProfit.toLocaleString()} 원`;
     this.kpiNetProfit.textContent = netFormatted;
     this.kpiNetProfit.className = `text-2xl font-extrabold mt-1 ${currentMonth.netProfit >= 0 ? 'text-slate-900' : 'text-rose-600'}`;
+
+    if (this.kpiMiniIncome) this.kpiMiniIncome.textContent = `${currentMonth.totalIncome.toLocaleString()} 원`;
+    if (this.kpiMiniExpense) this.kpiMiniExpense.textContent = `${currentMonth.selfExpense.toLocaleString()} 원`;
+    if (this.kpiMiniNet) {
+      this.kpiMiniNet.textContent = netFormatted;
+      this.kpiMiniNet.className = `text-lg font-extrabold ${currentMonth.netProfit >= 0 ? 'text-slate-900' : 'text-rose-600'}`;
+    }
   }
 
   // 신인/시니어 구간에 따라 다른 기준선을 적용하고, 과거 실적+향후 예정 스케줄을 함께 평균 낸
