@@ -1004,22 +1004,43 @@ class GfcAdvancedEngine {
     return result;
   }
 
-  // 최근 최대 12개월(위촉 이후 실제 경과월만 반영)의 월평균 총수입·월평균 자기계약 지출을 계산.
-  // 특정 한 달만 보면 전월에 큰 계약이 몰려 들어와 일시적으로 비율이 왜곡될 수 있어서,
-  // 안전선 판단은 이 평균값을 기준으로 한다 (renderSelfContractSafety, updateSelfVerdictPanel 공용).
+  // 신인(위촉 24개월 이하)은 자기계약으로 TP를 채워야 하는 구조적 이유가 있어 완화된 기준을,
+  // 시니어(25개월 이상)는 이미 안정적인 수입원이 있으므로 더 보수적인 기준을 적용한다.
+  // (기존 신인/시니어 수수료 구조 분기와 동일한 24개월 경계를 그대로 재사용)
+  static getSafetyThresholds(joinDateStr) {
+    const tenureMonths = this.calculateTenureMonth(joinDateStr);
+    const isSenior = tenureMonths > 24;
+    return isSenior
+      ? { safeThreshold: 0.10, cautionThreshold: 0.20, isSenior: true, tenureMonths }
+      : { safeThreshold: 0.15, cautionThreshold: 0.30, isSenior: false, tenureMonths };
+  }
+
+  // 안전선 판단용 수입·지출 스냅샷. 과거만 보면 이제 막 시작한 신인은 데이터가 거의 없어 편차가 크고,
+  // 반대로 미래만 보면 아직 불확실한 예상치에 낙관적으로 기울 수 있다. 그래서 "최근 최대 6개월(위촉
+  // 경과월만큼) + 향후 6개월(이번 달 포함)"을 함께 평균 내어 최대 12개월 롤링 윈도우로 균형을 맞춘다.
+  // (renderSelfContractSafety, updateSelfVerdictPanel 공용)
   static calculateTrailingSafetySnapshot(contracts, joinDateStr, clubKey) {
-    const tenureMonths = this.calculateTenureMonth(joinDateStr); // 위촉 후 경과 차월 (최소 1)
-    const windowMonths = Math.max(1, Math.min(12, tenureMonths));
+    const thresholds = this.getSafetyThresholds(joinDateStr);
+    const tenureMonths = thresholds.tenureMonths; // 위촉 후 경과 차월 (최소 1, 이번 달 포함)
+
+    const FUTURE_WINDOW = 6; // 이번 달 포함 향후 6개월
+    const pastMonths = Math.max(0, Math.min(6, tenureMonths - 1)); // 이번 달을 제외한 과거 개월 수
+    const totalMonths = pastMonths + FUTURE_WINDOW;
+
     const now = new Date();
     const currentMonthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-    const trailingStart = new Date(currentMonthStart.getFullYear(), currentMonthStart.getMonth() - (windowMonths - 1), 1);
+    const windowStart = new Date(currentMonthStart.getFullYear(), currentMonthStart.getMonth() - pastMonths, 1);
 
-    const aggregated = this.calculateAggregatedCashflow(contracts, windowMonths, joinDateStr, clubKey, false, trailingStart);
-    const avgIncome = aggregated.reduce((s, d) => s + Math.max(0, d.totalIncome), 0) / windowMonths;
-    const avgExpense = aggregated.reduce((s, d) => s + Math.max(0, d.selfExpense), 0) / windowMonths;
+    const aggregated = this.calculateAggregatedCashflow(contracts, totalMonths, joinDateStr, clubKey, false, windowStart);
+    const avgIncome = aggregated.reduce((s, d) => s + Math.max(0, d.totalIncome), 0) / totalMonths;
+    const avgExpense = aggregated.reduce((s, d) => s + Math.max(0, d.selfExpense), 0) / totalMonths;
     const ratio = avgIncome > 0 ? (avgExpense / avgIncome) : (avgExpense > 0 ? 1 : 0);
 
-    return { windowMonths, avgIncome, avgExpense, ratio };
+    return {
+      pastMonths, futureMonths: FUTURE_WINDOW, totalMonths,
+      avgIncome, avgExpense, ratio,
+      ...thresholds
+    };
   }
 }
 
@@ -1363,16 +1384,10 @@ class AppUI {
     this.kpiNetProfit.className = `text-2xl font-extrabold mt-1 ${currentMonth.netProfit >= 0 ? 'text-slate-900' : 'text-rose-600'}`;
   }
 
-  // 당월 총수입(수수료+프로모션+지원금) 대비 자기계약 보험료 지출 비율을 계산해 "안전선" 카드에 표시.
-  // 참고용 기준선: 10% 이하 안전 / 10~20% 주의 / 20% 초과 위험. 개인 고정지출·비상자금 여력에 따라 조정 필요.
-  // 최근 최대 12개월 평균 수입·지출을 기준으로 "안전선" 카드에 표시 (당월 단독 수치는
-  // 전월에 큰 계약이 몰리는 등 우연한 변동에 취약하므로, 평균으로 판단해 편차를 줄인다).
-  // 참고용 기준선: 10% 이하 안전 / 10~20% 주의 / 20% 초과 위험. 개인 고정지출·비상자금 여력에 따라 조정 필요.
+  // 신인/시니어 구간에 따라 다른 기준선을 적용하고, 과거 실적+향후 예정 스케줄을 함께 평균 낸
+  // 롤링 윈도우 비율을 "안전선" 카드에 표시한다 (자세한 로직은 calculateTrailingSafetySnapshot 참고).
   renderSelfContractSafety() {
     if (!this.safetyRatioValue) return;
-
-    const SAFE_THRESHOLD = 0.10;
-    const CAUTION_THRESHOLD = 0.20;
 
     if (!this.settings.joinDate) {
       this.safetyRatioValue.textContent = '0%';
@@ -1383,18 +1398,20 @@ class AppUI {
 
     const clubKey = this.selectClubTier.value || 'club_350';
     const snap = GfcAdvancedEngine.calculateTrailingSafetySnapshot(this.contracts, this.settings.joinDate, clubKey);
-    const { windowMonths, avgIncome, avgExpense, ratio } = snap;
+    const { pastMonths, futureMonths, totalMonths, avgIncome, avgExpense, ratio, safeThreshold, cautionThreshold, isSenior } = snap;
     const ratioPct = Math.round(ratio * 1000) / 10; // 소수 첫째자리까지
+    const safePct = Math.round(safeThreshold * 100);
+    const cautionPct = Math.round(cautionThreshold * 100);
 
     if (this.safetyRatioLabel) {
-      this.safetyRatioLabel.textContent = `최근 ${windowMonths}개월 평균 수입 대비 자기계약 지출 비율`;
+      this.safetyRatioLabel.textContent = `자기계약 안전선 (${isSenior ? '경력' : '신인'} 기준 · 최근 ${pastMonths}개월+향후 ${futureMonths}개월 평균)`;
     }
     this.safetyRatioValue.textContent = `${ratioPct}%`;
 
     let badgeLabel, badgeClass, barColor;
-    if (ratio <= SAFE_THRESHOLD) {
+    if (ratio <= safeThreshold) {
       badgeLabel = '안전'; badgeClass = 'bg-emerald-50 text-emerald-700 border-emerald-200'; barColor = 'bg-emerald-500';
-    } else if (ratio <= CAUTION_THRESHOLD) {
+    } else if (ratio <= cautionThreshold) {
       badgeLabel = '주의'; badgeClass = 'bg-amber-50 text-amber-700 border-amber-200'; barColor = 'bg-amber-500';
     } else {
       badgeLabel = '위험'; badgeClass = 'bg-rose-50 text-rose-700 border-rose-200'; barColor = 'bg-rose-500';
@@ -1404,23 +1421,28 @@ class AppUI {
     this.safetyRatioBar.style.width = `${Math.min(100, ratioPct)}%`;
     this.safetyRatioBar.className = `h-full rounded-full transition-all duration-300 ${barColor}`;
 
-    // 신규 자기계약 추가 시뮬레이션: 위험선(20%)까지 남은 (평균 기준) 여유 보험료 ÷ 입력한 예상 월납 = 추가 가능 건수
+    const thresholdNote = document.getElementById('safety-threshold-note');
+    if (thresholdNote) {
+      thresholdNote.textContent = `현재 적용 기준(${isSenior ? '경력 24개월 초과' : '신인 24개월 이하'}): ${safePct}% 이하 안전 · ${safePct}~${cautionPct}% 주의 · ${cautionPct}% 초과 위험 (참고용 기준선이며 개인 상황에 따라 조정하세요)`;
+    }
+
+    // 신규 자기계약 추가 시뮬레이션: 위험선까지 남은 (평균 기준) 여유 보험료 ÷ 입력한 예상 월납 = 추가 가능 건수
     if (!this.safetyRecommendation) return;
     const newPremium = parseMoneyInput(this.safetyNewPremiumInput.value);
-    const headroom = Math.max(0, CAUTION_THRESHOLD * avgIncome - avgExpense);
+    const headroom = Math.max(0, cautionThreshold * avgIncome - avgExpense);
 
     if (avgIncome <= 0) {
       this.safetyRecommendation.textContent = '진성계약 수당 데이터가 없어 계산할 수 없습니다. 진성계약을 먼저 등록해 주세요.';
     } else if (newPremium <= 0) {
-      this.safetyRecommendation.textContent = `최근 ${windowMonths}개월 평균 기준, 위험선(20%)까지 여유 보험료는 월 ${Math.round(headroom).toLocaleString()}원입니다. 예상 월 보험료를 입력하면 추가 가능 건수를 계산해 드립니다.`;
+      this.safetyRecommendation.textContent = `최근 ${pastMonths}개월+향후 ${futureMonths}개월 평균 기준, 위험선(${cautionPct}%)까지 여유 보험료는 월 ${Math.round(headroom).toLocaleString()}원입니다. 예상 월 보험료를 입력하면 추가 가능 건수를 계산해 드립니다.`;
     } else {
       const canAdd = Math.floor(headroom / newPremium);
       this.safetyRecommendation.innerHTML = canAdd > 0
-        ? `월 ${newPremium.toLocaleString()}원짜리 자기계약을 <strong class="text-slate-800">최대 ${canAdd}건</strong>까지 추가해도 (최근 ${windowMonths}개월 평균 기준) 위험선(20%) 이내로 유지됩니다.`
-        : `최근 ${windowMonths}개월 평균 기준 이미 위험선(20%)에 근접했거나 초과한 상태입니다. 이 금액대의 자기계약을 추가하면 비율이 20%를 넘습니다.`;
+        ? `월 ${newPremium.toLocaleString()}원짜리 자기계약을 <strong class="text-slate-800">최대 ${canAdd}건</strong>까지 추가해도 위험선(${cautionPct}%) 이내로 유지됩니다.`
+        : `이미 위험선(${cautionPct}%)에 근접했거나 초과한 상태입니다. 이 금액대의 자기계약을 추가하면 비율을 넘어섭니다.`;
     }
 
-    this.renderSelfContractSafetyChart(clubKey, SAFE_THRESHOLD, CAUTION_THRESHOLD);
+    this.renderSelfContractSafetyChart(clubKey, safeThreshold, cautionThreshold);
   }
 
   // 당월 비율은 스냅샷일 뿐, 자기계약이 겹치거나 해지 타이밍이 몰리면 몇 달 뒤 비율이 급등할 수 있다.
@@ -1461,7 +1483,7 @@ class AppUI {
             tension: 0.3
           },
           {
-            label: '주의선 (10%)',
+            label: `주의선 (${Math.round(safeThreshold * 100)}%)`,
             data: safeLine,
             borderColor: '#f59e0b',
             borderWidth: 1,
@@ -1470,7 +1492,7 @@ class AppUI {
             fill: false
           },
           {
-            label: '위험선 (20%)',
+            label: `위험선 (${Math.round(cautionThreshold * 100)}%)`,
             data: cautionLine,
             borderColor: '#e11d48',
             borderWidth: 1,
@@ -2454,14 +2476,14 @@ class AppUI {
       return;
     }
 
-    // 이 계약을 추가했을 때 "자기계약 안전선"(최근 최대 12개월 평균 기준) 비율이 어떻게 바뀌는지도 함께 계산
+    // 이 계약을 추가했을 때 "자기계약 안전선"(신인/시니어 기준 + 과거·향후 평균) 비율이 어떻게 바뀌는지도 함께 계산
     const clubKeyForSafety = this.selectClubTier.value || 'club_350';
     const scheduleCandidate = { ...candidate, contractType: '자기계약', status: '정상유지' };
     const contractsWithoutCandidate = this.contracts.filter(c => c.id !== editingId);
     const contractsWithCandidate = [...contractsWithoutCandidate, scheduleCandidate];
     const beforeSnap = GfcAdvancedEngine.calculateTrailingSafetySnapshot(contractsWithoutCandidate, this.settings.joinDate, clubKeyForSafety);
     const afterSnap = GfcAdvancedEngine.calculateTrailingSafetySnapshot(contractsWithCandidate, this.settings.joinDate, clubKeyForSafety);
-    const SAFE_T = 0.10, CAUTION_T = 0.20;
+    const { safeThreshold: SAFE_T, cautionThreshold: CAUTION_T } = afterSnap; // joinDate 기준이라 before/after 동일
     const beforeRatio = beforeSnap.ratio;
     const afterRatio = afterSnap.ratio;
     const labelOf = (r) => (r <= SAFE_T ? '안전' : (r <= CAUTION_T ? '주의' : '위험'));
@@ -2469,7 +2491,7 @@ class AppUI {
     const beforePct = Math.round(beforeRatio * 1000) / 10;
     const afterPct = Math.round(afterRatio * 1000) / 10;
     const worsened = labelOf(afterRatio) !== labelOf(beforeRatio) && afterRatio > beforeRatio;
-    const safetyWindowMonths = afterSnap.windowMonths;
+    const safetyWindowLabel = `최근 ${afterSnap.pastMonths}개월+향후 ${afterSnap.futureMonths}개월`;
 
     const isGood = result.verdict === 'good';
     // 30만 기준선 또는 현재 Club 등급 유지에 필수적인 계약이면, 단순 금액 손익과 별개로 강조 표시
@@ -2514,7 +2536,7 @@ class AppUI {
       </div>
       <div class="pt-1.5 border-t ${isGood ? 'border-emerald-200' : 'border-rose-200'} text-[11px] text-slate-700 space-y-1">
         <div class="flex items-center justify-between gap-2">
-          <span>자기계약 안전선 영향 (최근 ${safetyWindowMonths}개월 평균 기준)</span>
+          <span>자기계약 안전선 영향 (${safetyWindowLabel} 평균, ${afterSnap.isSenior ? '경력' : '신인'} 기준)</span>
           <span>${beforePct}% (${labelOf(beforeRatio)}) → <strong class="${colorOf(afterRatio)}">${afterPct}% (${labelOf(afterRatio)})</strong></span>
         </div>
         ${worsened ? `<div class="p-2 rounded-lg bg-rose-100 border border-rose-300 text-rose-800 text-[11px] font-semibold flex items-center gap-1.5"><i data-lucide="alert-triangle" class="w-3.5 h-3.5 shrink-0"></i>이 계약을 추가하면 안전선 등급이 '${labelOf(beforeRatio)}'에서 '${labelOf(afterRatio)}'(으)로 나빠집니다.</div>` : ''}
