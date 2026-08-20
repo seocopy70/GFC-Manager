@@ -137,69 +137,66 @@
       </div>
     </section>
 
-    <!-- KPI Summary Cards -->
-    <section class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-      <!-- Total Contracts -->
-      <div class="glass-card p-5 rounded-2xl border border-slate-200/80 shadow-sm relative overflow-hidden">
-        <div class="flex justify-between items-start">
-          <div>
-            <p class="text-xs font-semibold text-slate-500 uppercase tracking-wider">전체 관리 계약</p>
-            <h3 class="text-2xl font-extrabold text-slate-900 mt-1" id="kpi-total-count">0건</h3>
-            <p class="text-xs text-slate-500 mt-1" id="kpi-contract-breakdown">진성 0건 · 자기 0건</p>
-          </div>
-          <div class="p-3 bg-emerald-50 text-emerald-600 rounded-xl">
-            <i data-lucide="file-text" class="w-5 h-5"></i>
-          </div>
-        </div>
-      </div>
-
-      <!-- Monthly Total Income -->
-      <div onclick="app.openDetailModal('income')" class="glass-card p-5 rounded-2xl border border-slate-200/80 shadow-sm relative overflow-hidden cursor-pointer hover:border-emerald-500 transition group" title="클릭하여 수입 세부 내역 보기">
-        <div class="flex justify-between items-start">
-          <div>
-            <p class="text-xs font-semibold text-slate-500 uppercase tracking-wider flex items-center gap-1">당월 총 수수료+프로모션+보너스 <i data-lucide="external-link" class="w-3 h-3 text-emerald-600 group-hover:scale-110 transition"></i></p>
-            <h3 class="text-2xl font-extrabold text-emerald-600 mt-1" id="kpi-real-income">0 원</h3>
-            <p class="text-xs text-emerald-700/80 mt-1">클릭 시 항목별 상세 보기</p>
-          </div>
-          <div class="p-3 bg-emerald-50 text-emerald-600 rounded-xl">
-            <i data-lucide="trending-up" class="w-5 h-5"></i>
-          </div>
-        </div>
-      </div>
-
-      <!-- Monthly Self-Contract Outflow -->
-      <div onclick="app.openDetailModal('expense')" class="glass-card p-5 rounded-2xl border border-slate-200/80 shadow-sm relative overflow-hidden cursor-pointer hover:border-rose-500 transition group" title="클릭하여 지출 세부 내역 보기">
-        <div class="flex justify-between items-start">
-          <div>
-            <p class="text-xs font-semibold text-slate-500 uppercase tracking-wider flex items-center gap-1">당월 자기계약 지출 (보험료) <i data-lucide="external-link" class="w-3 h-3 text-rose-600 group-hover:scale-110 transition"></i></p>
-            <h3 class="text-2xl font-extrabold text-rose-600 mt-1" id="kpi-self-expense">0 원</h3>
-            <p class="text-xs text-rose-700/80 mt-1">클릭 시 계약별 상세 보기</p>
-          </div>
-          <div class="p-3 bg-rose-50 text-rose-600 rounded-xl">
-            <i data-lucide="arrow-down-right" class="w-5 h-5"></i>
-          </div>
-        </div>
-      </div>
-
-      <!-- Monthly Net Profit -->
-      <div onclick="app.openDetailModal('net')" class="glass-card p-5 rounded-2xl border border-slate-200/80 shadow-sm relative overflow-hidden cursor-pointer hover:border-blue-500 transition group" title="클릭하여 순손익 세부 내역 보기">
-        <div class="flex justify-between items-start">
-          <div>
-            <p class="text-xs font-semibold text-slate-500 uppercase tracking-wider flex items-center gap-1">당월 최종 실수령 순손익 <i data-lucide="external-link" class="w-3 h-3 text-blue-600 group-hover:scale-110 transition"></i></p>
-            <h3 class="text-2xl font-extrabold text-slate-900 mt-1" id="kpi-net-profit">0 원</h3>
-            <p class="text-xs text-slate-500 mt-1">클릭 시 수지 산출 내역 보기</p>
-          </div>
-          <div class="p-3 bg-blue-50 text-blue-600 rounded-xl">
-            <i data-lucide="wallet" class="w-5 h-5"></i>
-          </div>
-        </div>
-      </div>
-    </section>
-
     <!-- Cashflow Projection Chart & Self-Contract Flow Tab -->
-    <section class="grid grid-cols-1 lg:grid-cols-3 gap-6">
-      <!-- Main Chart (2 cols) with Tabs -->
-      <div class="lg:col-span-2 glass-card p-6 rounded-2xl border border-slate-200/80 shadow-sm space-y-4">
+    <section class="grid grid-cols-1 lg:grid-cols-4 gap-6">
+      <!-- KPI Cards Stack (1 col, left of chart) -->
+      <div class="lg:col-span-1 flex flex-col gap-3">
+        <!-- Total Contracts -->
+        <div class="glass-card p-3 rounded-2xl border border-slate-200/80 shadow-sm relative overflow-hidden">
+          <div class="flex justify-between items-center">
+            <div>
+              <p class="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">전체 관리 계약</p>
+              <h3 class="text-lg font-extrabold text-slate-900 mt-0.5" id="kpi-total-count">0건</h3>
+              <p class="text-[11px] text-slate-500 mt-0.5" id="kpi-contract-breakdown">진성 0건 · 자기 0건</p>
+            </div>
+            <div class="p-2 bg-emerald-50 text-emerald-600 rounded-xl shrink-0">
+              <i data-lucide="file-text" class="w-4 h-4"></i>
+            </div>
+          </div>
+        </div>
+
+        <!-- Monthly Total Income -->
+        <div onclick="app.openDetailModal('income')" class="glass-card p-3 rounded-2xl border border-slate-200/80 shadow-sm relative overflow-hidden cursor-pointer hover:border-emerald-500 transition group" title="클릭하여 수입 세부 내역 보기">
+          <div class="flex justify-between items-center">
+            <div>
+              <p class="text-[11px] font-semibold text-slate-500 uppercase tracking-wider flex items-center gap-1">당월 총 수수료+프로모션+보너스 <i data-lucide="external-link" class="w-3 h-3 text-emerald-600 group-hover:scale-110 transition"></i></p>
+              <h3 class="text-lg font-extrabold text-emerald-600 mt-0.5" id="kpi-real-income">0 원</h3>
+            </div>
+            <div class="p-2 bg-emerald-50 text-emerald-600 rounded-xl shrink-0">
+              <i data-lucide="trending-up" class="w-4 h-4"></i>
+            </div>
+          </div>
+        </div>
+
+        <!-- Monthly Self-Contract Outflow -->
+        <div onclick="app.openDetailModal('expense')" class="glass-card p-3 rounded-2xl border border-slate-200/80 shadow-sm relative overflow-hidden cursor-pointer hover:border-rose-500 transition group" title="클릭하여 지출 세부 내역 보기">
+          <div class="flex justify-between items-center">
+            <div>
+              <p class="text-[11px] font-semibold text-slate-500 uppercase tracking-wider flex items-center gap-1">당월 자기계약 지출 (보험료) <i data-lucide="external-link" class="w-3 h-3 text-rose-600 group-hover:scale-110 transition"></i></p>
+              <h3 class="text-lg font-extrabold text-rose-600 mt-0.5" id="kpi-self-expense">0 원</h3>
+            </div>
+            <div class="p-2 bg-rose-50 text-rose-600 rounded-xl shrink-0">
+              <i data-lucide="arrow-down-right" class="w-4 h-4"></i>
+            </div>
+          </div>
+        </div>
+
+        <!-- Monthly Net Profit -->
+        <div onclick="app.openDetailModal('net')" class="glass-card p-3 rounded-2xl border border-slate-200/80 shadow-sm relative overflow-hidden cursor-pointer hover:border-blue-500 transition group" title="클릭하여 순손익 세부 내역 보기">
+          <div class="flex justify-between items-center">
+            <div>
+              <p class="text-[11px] font-semibold text-slate-500 uppercase tracking-wider flex items-center gap-1">당월 최종 실수령 순손익 <i data-lucide="external-link" class="w-3 h-3 text-blue-600 group-hover:scale-110 transition"></i></p>
+              <h3 class="text-lg font-extrabold text-slate-900 mt-0.5" id="kpi-net-profit">0 원</h3>
+            </div>
+            <div class="p-2 bg-blue-50 text-blue-600 rounded-xl shrink-0">
+              <i data-lucide="wallet" class="w-4 h-4"></i>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Main Chart (3 cols) with Tabs -->
+      <div class="lg:col-span-3 glass-card p-6 rounded-2xl border border-slate-200/80 shadow-sm space-y-4">
         <div class="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-4">
           <div class="flex items-center space-x-3">
             <div class="inline-flex p-1 bg-slate-100 rounded-lg text-xs font-medium">
@@ -218,31 +215,6 @@
         </div>
         <div class="h-80 relative w-full">
           <canvas id="cashflowChart"></canvas>
-        </div>
-      </div>
-
-      <!-- Monthly Income/Expense/Net Mini Summary (1 col, next to chart) -->
-      <div class="glass-card p-5 rounded-2xl border border-slate-200/80 shadow-sm flex flex-col">
-        <div class="border-b border-slate-100 pb-2 mb-1">
-          <h2 class="text-sm font-bold text-slate-800 flex items-center gap-2">
-            <i data-lucide="wallet" class="w-4 h-4 text-blue-500"></i>
-            당월 수지 요약
-          </h2>
-          <p class="text-[11px] text-slate-500">이번 달 수입·지출·순손익 한눈에 보기</p>
-        </div>
-        <div class="divide-y divide-slate-100 flex-1 flex flex-col justify-center">
-          <div class="flex items-center justify-between py-3">
-            <span class="text-xs font-semibold text-slate-500">당월 수입</span>
-            <span class="text-lg font-extrabold text-emerald-600" id="kpi-mini-income">0 원</span>
-          </div>
-          <div class="flex items-center justify-between py-3">
-            <span class="text-xs font-semibold text-slate-500">당월 지출</span>
-            <span class="text-lg font-extrabold text-rose-600" id="kpi-mini-expense">0 원</span>
-          </div>
-          <div class="flex items-center justify-between py-3">
-            <span class="text-xs font-semibold text-slate-500">당월 순손익</span>
-            <span class="text-lg font-extrabold text-slate-900" id="kpi-mini-net">0 원</span>
-          </div>
         </div>
       </div>
     </section>
