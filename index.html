@@ -139,13 +139,13 @@
 
     <!-- Cashflow Projection Chart & Self-Contract Flow Tab -->
     <section class="grid grid-cols-1 lg:grid-cols-4 gap-6">
-      <!-- KPI Cards Stack (1 col, left of chart) -->
-      <div class="lg:col-span-1 flex flex-col gap-3">
+      <!-- KPI Cards Stack (1 col, left of chart, matches chart height) -->
+      <div class="lg:col-span-1 flex flex-col gap-3 h-full">
         <!-- Total Contracts -->
-        <div class="glass-card p-3 rounded-2xl border border-slate-200/80 shadow-sm relative overflow-hidden">
+        <div class="glass-card p-3 rounded-2xl border border-slate-200/80 shadow-sm relative overflow-hidden flex-1 flex flex-col justify-center">
           <div class="flex justify-between items-center">
             <div>
-              <p class="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">전체 관리 계약</p>
+              <p class="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">전체 보유 계약</p>
               <h3 class="text-lg font-extrabold text-slate-900 mt-0.5" id="kpi-total-count">0건</h3>
               <p class="text-[11px] text-slate-500 mt-0.5" id="kpi-contract-breakdown">진성 0건 · 자기 0건</p>
             </div>
@@ -156,7 +156,7 @@
         </div>
 
         <!-- Monthly Total Income -->
-        <div onclick="app.openDetailModal('income')" class="glass-card p-3 rounded-2xl border border-slate-200/80 shadow-sm relative overflow-hidden cursor-pointer hover:border-emerald-500 transition group" title="클릭하여 수입 세부 내역 보기">
+        <div onclick="app.openDetailModal('income')" class="glass-card p-3 rounded-2xl border border-slate-200/80 shadow-sm relative overflow-hidden cursor-pointer hover:border-emerald-500 transition group flex-1 flex flex-col justify-center" title="클릭하여 수입 세부 내역 보기">
           <div class="flex justify-between items-center">
             <div>
               <p class="text-[11px] font-semibold text-slate-500 uppercase tracking-wider flex items-center gap-1">당월 총 수수료+프로모션+보너스 <i data-lucide="external-link" class="w-3 h-3 text-emerald-600 group-hover:scale-110 transition"></i></p>
@@ -169,7 +169,7 @@
         </div>
 
         <!-- Monthly Self-Contract Outflow -->
-        <div onclick="app.openDetailModal('expense')" class="glass-card p-3 rounded-2xl border border-slate-200/80 shadow-sm relative overflow-hidden cursor-pointer hover:border-rose-500 transition group" title="클릭하여 지출 세부 내역 보기">
+        <div onclick="app.openDetailModal('expense')" class="glass-card p-3 rounded-2xl border border-slate-200/80 shadow-sm relative overflow-hidden cursor-pointer hover:border-rose-500 transition group flex-1 flex flex-col justify-center" title="클릭하여 지출 세부 내역 보기">
           <div class="flex justify-between items-center">
             <div>
               <p class="text-[11px] font-semibold text-slate-500 uppercase tracking-wider flex items-center gap-1">당월 자기계약 지출 (보험료) <i data-lucide="external-link" class="w-3 h-3 text-rose-600 group-hover:scale-110 transition"></i></p>
@@ -182,7 +182,7 @@
         </div>
 
         <!-- Monthly Net Profit -->
-        <div onclick="app.openDetailModal('net')" class="glass-card p-3 rounded-2xl border border-slate-200/80 shadow-sm relative overflow-hidden cursor-pointer hover:border-blue-500 transition group" title="클릭하여 순손익 세부 내역 보기">
+        <div onclick="app.openDetailModal('net')" class="glass-card p-3 rounded-2xl border border-slate-200/80 shadow-sm relative overflow-hidden cursor-pointer hover:border-blue-500 transition group flex-1 flex flex-col justify-center" title="클릭하여 순손익 세부 내역 보기">
           <div class="flex justify-between items-center">
             <div>
               <p class="text-[11px] font-semibold text-slate-500 uppercase tracking-wider flex items-center gap-1">당월 최종 실수령 순손익 <i data-lucide="external-link" class="w-3 h-3 text-blue-600 group-hover:scale-110 transition"></i></p>
@@ -196,7 +196,7 @@
       </div>
 
       <!-- Main Chart (3 cols) with Tabs -->
-      <div class="lg:col-span-3 glass-card p-6 rounded-2xl border border-slate-200/80 shadow-sm space-y-4">
+      <div class="lg:col-span-3 glass-card p-6 rounded-2xl border border-slate-200/80 shadow-sm space-y-4 flex flex-col">
         <div class="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-4">
           <div class="flex items-center space-x-3">
             <div class="inline-flex p-1 bg-slate-100 rounded-lg text-xs font-medium">
@@ -328,7 +328,7 @@
 
       <!-- Contract Table -->
       <div class="overflow-x-auto">
-        <table class="w-full text-left border-collapse text-xs whitespace-nowrap">
+        <table class="w-full text-left border-collapse text-sm whitespace-nowrap">
           <thead>
             <tr class="bg-slate-50 border-b border-slate-200 text-slate-600 font-semibold uppercase tracking-wider">
               <th class="py-3 px-4">구분</th>
