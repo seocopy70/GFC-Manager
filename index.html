@@ -76,7 +76,7 @@
     <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
       <div id="auth-container" class="flex items-center space-x-4">
         <span id="user-email" class="text-xs text-slate-400"></span>
-        <button id="btn-logout" class="text-xs bg-slate-800 hover:bg-slate-700 px-3 py-1 rounded">로그아웃</button>
+        <button id="btn-logout" class="p-2 text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg transition" title="로그아웃" aria-label="로그아웃"><i data-lucide="log-out" class="w-4 h-4"></i></button>
       </div>
       
       <script>
@@ -87,17 +87,15 @@
         <div class="p-2 bg-emerald-600 rounded-xl text-white shadow-lg">
           <i data-lucide="shield-check" class="w-6 h-6"></i>
         </div>
-        <h1 class="text-lg font-bold tracking-tight hidden sm:block">GFC Premium Manager</h1>
+        <h1 class="text-lg font-bold tracking-tight hidden sm:block">GFC Manager</h1>
       </div>
       
       <div class="flex items-center space-x-2 sm:space-x-3">
-        <button id="btn-open-rules-modal" class="text-xs bg-slate-800 hover:bg-slate-700 text-white px-3 py-2 rounded-lg font-medium transition flex items-center gap-1.5" title="수입지출 규정집 보기">
+        <button id="btn-open-rules-modal" class="p-2 bg-slate-800 hover:bg-slate-700 text-white rounded-lg transition" title="수입지출 규정집 보기" aria-label="수입지출 규정집 보기">
           <i data-lucide="book-open" class="w-4 h-4"></i>
-          <span class="hidden sm:inline">규정집</span>
         </button>
-        <button id="btn-open-modal" class="text-xs bg-emerald-600 hover:bg-emerald-500 text-white px-3 sm:px-4 py-2 rounded-lg font-medium transition shadow-md flex items-center gap-1.5">
+        <button id="btn-open-modal" class="p-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg transition shadow-md" title="새 계약 등록" aria-label="새 계약 등록">
           <i data-lucide="plus-circle" class="w-4 h-4"></i>
-          <span>새 계약 등록</span>
         </button>
       </div>
     </div>
