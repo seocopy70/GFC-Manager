@@ -1266,7 +1266,7 @@ class AppUI {
   async enterApp(user) {
     this.loginOverlay.classList.add('hidden');
     this.mainHeader.classList.remove('hidden');
-    document.getElementById('user-email').textContent = user.email;
+    document.getElementById('user-email').textContent = user.email.split('@')[0];
 
     try {
       this.settings = await ContractStore.getSettings();
