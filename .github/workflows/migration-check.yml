@@ -1,0 +1,28 @@
+name: Migration branch static checks
+
+on:
+  push:
+    branches:
+      - migration/oracle-postgres
+  pull_request:
+    branches:
+      - migration/oracle-postgres
+
+jobs:
+  syntax:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Check frontend JavaScript
+        run: |
+          node --check app.js
+          node --check config.js
+          node --check sw.js
+      - name: Check Python syntax
+        run: python -m py_compile backend/app.py
