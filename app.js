@@ -6,111 +6,73 @@
  * Updated with Independent Monthly TP Calculation, Detailed Multi-month Cashflow & Self Analysis.
  */
 
-// --- Data Model & Storage (Supabase 전용) ---
+// --- Data Model & Storage (same-origin Flask API) ---
 class ContractStore {
-  static async getSettings() {
-    const user = await this.checkAuth();
-    if (!user) return { joinDate: '2025-01', clubTier: 'club_350' };
+  static csrfToken = null;
 
-    const { data, error } = await window.supabase
-      .from('profiles')
-      .select('settings')
-      .eq('id', user.id)
-      .single();
-    if (error) console.error('Supabase 설정 로드 에러:', error);
-    return (data && data.settings) ? data.settings : { joinDate: '2025-01', clubTier: 'club_350' };
+  static async request(path, options = {}) {
+    const method = (options.method || 'GET').toUpperCase();
+    const headers = { Accept: 'application/json', ...(options.headers || {}) };
+    if (options.body !== undefined) headers['Content-Type'] = 'application/json';
+    if (!['GET', 'HEAD', 'OPTIONS'].includes(method) && this.csrfToken) {
+      headers['X-CSRF-Token'] = this.csrfToken;
+    }
+    const response = await fetch('/api' + path, {
+      method,
+      credentials: 'same-origin',
+      headers,
+      body: options.body === undefined ? undefined : JSON.stringify(options.body)
+    });
+    const result = await response.json().catch(() => ({}));
+    if (result.csrfToken) this.csrfToken = result.csrfToken;
+    if (!response.ok) {
+      if (response.status === 401) this.csrfToken = null;
+      throw new Error(result.error || '서버 요청에 실패했습니다.');
+    }
+    return result;
+  }
+
+  static async getSettings() {
+    const result = await this.request('/profile');
+    return result.settings || { joinDate: '2025-01', clubTier: 'club_350' };
   }
 
   static async saveSettings(settings) {
-    const user = await this.checkAuth();
-    if (!user) throw new Error('로그인이 필요합니다.');
-
-    const { error } = await window.supabase
-      .from('profiles')
-      .upsert({ id: user.id, settings: settings });
-
-    if (error) {
-      console.error('Supabase settings save error:', error);
-      throw new Error('Supabase 설정 저장 실패: ' + error.message);
-    }
+    await this.request('/profile', { method: 'PUT', body: { settings } });
   }
 
-  // 인증 상태 관리
   static async checkAuth() {
     try {
-      const { data, error } = await window.supabase.auth.getUser();
-      // persistSession:false 설정에서는 페이지를 열 때마다 저장된 세션이 없는 상태로 시작하는데,
-      // 이 경우 Supabase가 "Auth session missing" 오류를 반환하는 게 알려진 정상 동작이다.
-      // 이건 실제 오류가 아니라 "아직 로그인 안 한 상태"이므로 조용히 null(로그아웃 상태)로 처리한다.
-      if (error) return null;
-      return data ? data.user : null;
-    } catch (e) {
+      const result = await this.request('/auth/session');
+      return result.user || null;
+    } catch (error) {
+      console.error('로그인 상태 확인 실패:', error);
       return null;
     }
   }
 
-  // 아이디(이메일 @ 앞부분)만으로 전체 이메일을 찾기 위한 조회 (user_lookup 테이블, 비로그인 상태에서도 조회 가능해야 함)
-  static async lookupEmailByUsername(username) {
-    if (!window.supabase || !username) return null;
-    try {
-      const { data, error } = await window.supabase
-        .from('user_lookup')
-        .select('email')
-        .eq('username', username)
-        .maybeSingle();
-      if (error || !data) return null;
-      return data.email;
-    } catch (e) {
-      return null; // user_lookup 테이블이 아직 없는 경우 등 — 조용히 실패 처리
-    }
-  }
-
-  // 로그인 성공 시 아이디→이메일 매핑을 자동으로 등록/갱신 (다음부터 아이디만으로 로그인 가능하게)
-  static async registerUsernameLookup(user) {
-    if (!window.supabase || !user || !user.email) return;
-    const username = user.email.split('@')[0];
-    try {
-      await window.supabase
-        .from('user_lookup')
-        .upsert({ username, email: user.email, user_id: user.id });
-    } catch (e) {
-      console.error('아이디 조회용 정보 등록 실패 (user_lookup 테이블이 없을 수 있음):', e);
-    }
-  }
-
-  static async login(email, password) {
-    if (!email || !password) {
-      throw new Error('이메일과 비밀번호를 모두 입력해주세요.');
-    }
-    if (!window.supabase) {
-      console.error('Supabase 객체 없음:', window.supabase);
-      throw new Error('Supabase가 초기화되지 않았습니다.');
-    }
-    const { data, error } = await window.supabase.auth.signInWithPassword({ email, password });
-    if (error) throw error;
-    return data;
+  static async login(identifier, password) {
+    if (!identifier || !password) throw new Error('이메일(또는 아이디)과 비밀번호를 모두 입력해주세요.');
+    const result = await this.request('/auth/login', {
+      method: 'POST',
+      body: { identifier, password }
+    });
+    return { user: result.user };
   }
 
   static async signup(email, password) {
-    if (!email || !password) {
-      throw new Error('이메일과 비밀번호를 모두 입력해주세요.');
-    }
-    if (!window.supabase) {
-      console.error('Supabase 객체 없음:', window.supabase);
-      throw new Error('Supabase가 초기화되지 않았습니다.');
-    }
-    const { data, error } = await window.supabase.auth.signUp({ email, password });
-    if (error) throw error;
-    return data;
+    if (!email || !password) throw new Error('이메일과 비밀번호를 모두 입력해주세요.');
+    return this.request('/auth/signup', { method: 'POST', body: { email, password } });
   }
 
   static async logout() {
-    if (window.supabase) {
-      await window.supabase.auth.signOut();
+    try {
+      await this.request('/auth/logout', { method: 'POST' });
+    } finally {
+      this.csrfToken = null;
     }
   }
 
-  // Supabase row(snake_case) -> 앱 내부 모델(camelCase) 변환
   static mapFromDb(row) {
     if (!row) return row;
     return {
@@ -136,170 +98,44 @@ class ContractStore {
     };
   }
 
-  // Supabase 연동 메서드 (사용자별 데이터 필터링, 소프트 삭제된 계약은 제외)
-  static async getContractsFromSupabase() {
-    const user = await this.checkAuth();
-    if (!user) return [];
-
-    const { data, error } = await window.supabase
-      .from('contracts')
-      .select('*')
-      .eq('user_id', user.id)
-      .eq('is_deleted', false);
-    
-    if (error) {
-      console.error('Supabase 데이터 로드 에러:', error);
-      return [];
-    }
-    return (data || []).map(row => this.mapFromDb(row));
+  static async getContracts() {
+    const result = await this.request('/contracts');
+    return (result.contracts || []).map(row => this.mapFromDb(row));
   }
 
-  // 최근 소프트 삭제한 계약 목록 (다시 불러오기 UI용, DB에 영구 보관되므로 세션/새로고침과 무관하게 유지)
-  static async getRecentlyDeletedFromSupabase(limit = 10) {
-    const user = await this.checkAuth();
-    if (!user) return [];
-
-    const { data, error } = await window.supabase
-      .from('contracts')
-      .select('*')
-      .eq('user_id', user.id)
-      .eq('is_deleted', true)
-      .order('deleted_at', { ascending: false })
-      .limit(limit);
-
-    if (error) {
-      console.error('삭제된 계약 목록 로드 에러:', error);
-      return [];
-    }
-    return (data || []).map(row => this.mapFromDb(row));
+  static async getRecentlyDeleted(limit = 10) {
+    const result = await this.request('/contracts/recently-deleted?limit=' + encodeURIComponent(limit));
+    return (result.contracts || []).map(row => this.mapFromDb(row));
   }
 
-  static async syncToSupabase(contract) {
-    const user = await this.checkAuth();
-    if (!user) return;
-    
-    const { data, error } = await window.supabase
-      .from('contracts')
-      .insert([{ ...contract, user_id: user.id }]);
-    if (error) throw error;
-    return data;
+  static async syncContract(contract) {
+    return this.addContract(contract);
   }
 
-  // Supabase 연동 메서드들
-  static async addContractToSupabase(contract) {
-    const user = await this.checkAuth();
-    if (!user) throw new Error('로그인이 필요합니다.');
-    
-    // 데이터 정제: undefined/null 값 제거 및 타입 변환
-    const contractToSave = {
-      user_id: user.id,
-      created_at: new Date().toISOString(),
-      contract_type: contract.contractType || '진성계약',
-      status: contract.status || '정상유지',
-      termination_month: Number(contract.terminationMonth) || 0,
-      product_group: contract.productGroup || '건강/상해보험',
-      client: contract.client || '',
-      company: contract.company || '삼성생명',
-      title: contract.title || '',
-      start_date: contract.startDate || new Date().toISOString().split('T')[0],
-      premium: Number(contract.premium) || 0,
-      payment_years: Number(contract.paymentYears) || 20,
-      tp: Number(contract.tp) || 0,
-      surrender_value_16: Number(contract.surrenderValue16) || 0,
-      promotions: contract.promotions || [],
-      memo: contract.memo || ''
-    };
-    
-    console.log('Supabase insert payload:', contractToSave);
-    
-    const { data, error } = await window.supabase
-      .from('contracts')
-      .insert([contractToSave])
-      .select();
-    
-    if (error) {
-      console.error('Supabase insert error details:', error);
-      throw new Error('계약 저장 실패: ' + error.message);
-    }
-    return this.mapFromDb(data[0]);
+  static async addContract(contract) {
+    const result = await this.request('/contracts', { method: 'POST', body: contract });
+    return this.mapFromDb(result.contract);
   }
 
-  static async updateContractToSupabase(contract) {
-    const user = await this.checkAuth();
-    if (!user) throw new Error('로그인이 필요합니다.');
-    
-    const contractToUpdate = {
-      contract_type: contract.contractType,
-      status: contract.status,
-      termination_month: contract.terminationMonth,
-      product_group: contract.productGroup,
-      client: contract.client,
-      company: contract.company,
-      title: contract.title,
-      start_date: contract.startDate,
-      premium: contract.premium,
-      payment_years: contract.paymentYears,
-      tp: contract.tp,
-      surrender_value_16: contract.surrenderValue16,
-      promotions: contract.promotions,
-      memo: contract.memo
-    };
-
-    const { data, error } = await window.supabase
-      .from('contracts')
-      .update(contractToUpdate)
-      .eq('id', contract.id)
-      .eq('user_id', user.id)
-      .select();
-    
-    if (error) throw error;
-    return this.mapFromDb(data[0]);
+  static async updateContract(contract) {
+    const result = await this.request('/contracts/' + encodeURIComponent(contract.id), {
+      method: 'PUT',
+      body: contract
+    });
+    return this.mapFromDb(result.contract);
   }
 
-  // 소프트 삭제: 실제로 행을 지우지 않고 is_deleted/deleted_at만 표시.
-  // DB에는 그대로 남아있으므로 대시보드·계산 로직에서만 제외되고, 이후 언제든 restoreContractInSupabase로 복원 가능.
-  static async deleteContractFromSupabase(id) {
-    const user = await this.checkAuth();
-    if (!user) throw new Error('로그인이 필요합니다.');
-
-    const { error } = await window.supabase
-      .from('contracts')
-      .update({ is_deleted: true, deleted_at: new Date().toISOString() })
-      .eq('id', id)
-      .eq('user_id', user.id);
-
-    if (error) throw error;
+  static async deleteContract(id) {
+    await this.request('/contracts/' + encodeURIComponent(id), { method: 'DELETE' });
   }
 
-  // 소프트 삭제된 계약을 원래 상태로 복원 (같은 id 그대로 되살림)
-  static async restoreContractInSupabase(id) {
-    const user = await this.checkAuth();
-    if (!user) throw new Error('로그인이 필요합니다.');
-
-    const { error } = await window.supabase
-      .from('contracts')
-      .update({ is_deleted: false, deleted_at: null })
-      .eq('id', id)
-      .eq('user_id', user.id);
-
-    if (error) throw error;
+  static async restoreContract(id) {
+    await this.request('/contracts/' + encodeURIComponent(id) + '/restore', { method: 'POST', body: {} });
   }
 
-  // 완전 삭제: 소프트 삭제 목록에서 행 자체를 영구적으로 제거. 복원 불가능하므로 신중히 사용.
   static async permanentlyDeleteContract(id) {
-    const user = await this.checkAuth();
-    if (!user) throw new Error('로그인이 필요합니다.');
-
-    const { error } = await window.supabase
-      .from('contracts')
-      .delete()
-      .eq('id', id)
-      .eq('user_id', user.id)
-      .eq('is_deleted', true); // 소프트 삭제 상태인 계약만 완전 삭제 가능 (안전장치)
-
-    if (error) throw error;
+    await this.request('/contracts/' + encodeURIComponent(id) + '/permanent', { method: 'DELETE' });
   }
-
 }
 
 // --- GFC Advanced Financial Engine (Manual Club Tier Integration with 30 만 Club) ---
@@ -1270,8 +1106,8 @@ class AppUI {
 
     try {
       this.settings = await ContractStore.getSettings();
-      this.contracts = await ContractStore.getContractsFromSupabase();
-      this.recentlyDeleted = await ContractStore.getRecentlyDeletedFromSupabase(10);
+      this.contracts = await ContractStore.getContracts();
+      this.recentlyDeleted = await ContractStore.getRecentlyDeleted(10);
     } catch (e) {
       console.error('데이터 로드 실패:', e);
     }
@@ -1296,29 +1132,17 @@ class AppUI {
   }
 
   async handleLoginOrSignup() {
-    let email = this.loginEmail.value.trim();
+    const identifier = this.loginEmail.value.trim();
     const password = this.loginPassword.value;
-
-    // '@' 없이 아이디만 입력한 경우: 1순위 Supabase(user_lookup 테이블)에서 등록된 이메일 조회,
-    // 실패 시 config.js의 AUTO_LOGIN_EMAIL_DOMAIN으로 폴백
-    if (email && !email.includes('@') && !this.isSignupMode) {
-      const found = await ContractStore.lookupEmailByUsername(email);
-      if (found) {
-        email = found;
-      } else if (typeof AUTO_LOGIN_EMAIL_DOMAIN === 'string' && AUTO_LOGIN_EMAIL_DOMAIN) {
-        email = `${email}@${AUTO_LOGIN_EMAIL_DOMAIN}`;
-      }
-    }
 
     this.btnLogin.disabled = true;
     try {
       if (this.isSignupMode) {
-        await ContractStore.signup(email, password);
-        alert('가입이 완료되었습니다. 이메일 인증이 필요할 수 있습니다. 인증 후 로그인해주세요.');
+        await ContractStore.signup(identifier, password);
+        alert('가입이 완료되었습니다. 로그인해주세요.');
         this.toggleSignupMode();
       } else {
-        const { user } = await ContractStore.login(email, password);
-        await ContractStore.registerUsernameLookup(user);
+        const { user } = await ContractStore.login(identifier, password);
         await this.enterApp(user);
       }
     } catch (e) {
@@ -2600,12 +2424,12 @@ class AppUI {
     try {
       if (id) {
         contractData.id = id;
-        await ContractStore.updateContractToSupabase(contractData);
+        await ContractStore.updateContract(contractData);
       } else {
-        await ContractStore.addContractToSupabase(contractData);
+        await ContractStore.addContract(contractData);
       }
-      alert('데이터가 Supabase 에 저장되었습니다.');
-      this.contracts = await ContractStore.getContractsFromSupabase();
+      alert('데이터가 서버에 저장되었습니다.');
+      this.contracts = await ContractStore.getContracts();
       this.settings = await ContractStore.getSettings();
       this.closeModal();
       this.renderAll();
@@ -2618,9 +2442,9 @@ class AppUI {
   async deleteContract(id) {
     if (confirm('해당 계약 항목을 삭제하시겠습니까? (DB에는 보관되며, 최근 삭제 3건까지는 다시 불러올 수 있습니다)')) {
       try {
-        await ContractStore.deleteContractFromSupabase(id);
-        this.contracts = await ContractStore.getContractsFromSupabase();
-        this.recentlyDeleted = await ContractStore.getRecentlyDeletedFromSupabase(10);
+        await ContractStore.deleteContract(id);
+        this.contracts = await ContractStore.getContracts();
+        this.recentlyDeleted = await ContractStore.getRecentlyDeleted(10);
         this.renderAll();
       } catch (e) {
         alert('삭제 실패: ' + e.message);
@@ -2631,9 +2455,9 @@ class AppUI {
   // 최근 삭제 목록(최대 10개, DB 조회)에서 계약을 원래 상태로 복원한다.
   async restoreContract(id) {
     try {
-      await ContractStore.restoreContractInSupabase(id);
-      this.contracts = await ContractStore.getContractsFromSupabase();
-      this.recentlyDeleted = await ContractStore.getRecentlyDeletedFromSupabase(10);
+      await ContractStore.restoreContract(id);
+      this.contracts = await ContractStore.getContracts();
+      this.recentlyDeleted = await ContractStore.getRecentlyDeleted(10);
       this.renderAll();
     } catch (e) {
       alert('복원 실패: ' + e.message);
@@ -2645,7 +2469,7 @@ class AppUI {
     if (!confirm('이 계약을 완전히 삭제하시겠습니까? 이 작업은 되돌릴 수 없습니다.')) return;
     try {
       await ContractStore.permanentlyDeleteContract(id);
-      this.recentlyDeleted = await ContractStore.getRecentlyDeletedFromSupabase(10);
+      this.recentlyDeleted = await ContractStore.getRecentlyDeleted(10);
       this.renderAll();
     } catch (e) {
       alert('완전 삭제 실패: ' + e.message);
