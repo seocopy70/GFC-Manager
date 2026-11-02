@@ -24,6 +24,7 @@ APP_ORIGIN = os.environ.get("APP_ORIGIN", "").rstrip("/")
 COOKIE_NAME = os.environ.get("SESSION_COOKIE_NAME", "gfc_session")
 SESSION_DAYS = int(os.environ.get("SESSION_DAYS", "30"))
 COOKIE_SECURE = os.environ.get("COOKIE_SECURE", "true").lower() == "true"
+INVITE_CODE = os.environ.get("INVITE_CODE", "")
 
 if not DATABASE_URL:
     raise RuntimeError("DATABASE_URL 환경변수가 필요합니다.")
@@ -352,6 +353,9 @@ def signup():
     data = json_body()
     email = str(data.get("email") or "").strip().lower()
     password = str(data.get("password") or "")
+    invite_code = str(data.get("inviteCode") or "")
+    if not INVITE_CODE or not hmac.compare_digest(invite_code, INVITE_CODE):
+        return jsonify(error="초대코드가 올바르지 않습니다."), 403
     if not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email):
         return jsonify(error="회원가입에는 올바른 이메일 주소가 필요합니다."), 400
     if len(password) < 6:
