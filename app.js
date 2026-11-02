@@ -62,7 +62,8 @@ class ContractStore {
 
   static async signup(email, password) {
     if (!email || !password) throw new Error('이메일과 비밀번호를 모두 입력해주세요.');
-    return this.request('/auth/signup', { method: 'POST', body: { email, password } });
+    const inviteCode = document.getElementById('signup-invite-code')?.value.trim() || '';
+    return this.request('/auth/signup', { method: 'POST', body: { email, password, inviteCode } });
   }
 
   static async logout() {
