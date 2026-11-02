@@ -1,13 +1,14 @@
 const CACHE_NAME = 'gfc-manager-v2';
-const BASE = '/GFC-Manager/';
+const BASE_URL = new URL('./', self.registration.scope);
+const BASE = BASE_URL.pathname;
 const APP_SHELL = [
   BASE,
-  BASE + 'index.html',
-  BASE + 'app.js',
-  BASE + 'config.js',
-  BASE + 'manifest.webmanifest',
-  BASE + 'icons/icon-192.svg',
-  BASE + 'icons/icon-512.svg'
+  new URL('index.html', BASE_URL).href,
+  new URL('app.js', BASE_URL).href,
+  new URL('config.js', BASE_URL).href,
+  new URL('manifest.webmanifest', BASE_URL).href,
+  new URL('icons/icon-192.svg', BASE_URL).href,
+  new URL('icons/icon-512.svg', BASE_URL).href
 ];
 
 self.addEventListener('install', (event) => {
@@ -46,7 +47,7 @@ self.addEventListener('fetch', (event) => {
           caches.open(CACHE_NAME).then((cache) => cache.put(request, copy));
           return response;
         })
-        .catch(() => caches.match(BASE + 'index.html').then((response) => response || caches.match(BASE)))
+        .catch(() => caches.match(new URL('index.html', BASE_URL).href).then((response) => response || caches.match(BASE_URL.href)))
     );
     return;
   }
