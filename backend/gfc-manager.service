@@ -1,0 +1,22 @@
+[Unit]
+Description=GFC Manager Flask API
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/home/ubuntu/GFC-Manager/backend
+EnvironmentFile=/etc/gfc-manager/gfc-manager.env
+ExecStart=/home/ubuntu/GFC-Manager/backend/venv/bin/gunicorn --workers 1 --threads 4 --bind 127.0.0.1:8011 --access-logfile - --error-logfile - app:app
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ReadWritePaths=/home/ubuntu/GFC-Manager/backend
+
+[Install]
+WantedBy=multi-user.target
