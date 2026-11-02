@@ -1,4 +1,4 @@
-const CACHE_NAME = 'gfc-manager-v1';
+const CACHE_NAME = 'gfc-manager-v2';
 const BASE = '/GFC-Manager/';
 const APP_SHELL = [
   BASE,
@@ -34,9 +34,8 @@ self.addEventListener('fetch', (event) => {
 
   const url = new URL(request.url);
 
-  // Keep Supabase/API requests online-only. Authentication and cloud data
-  // should never be served from a stale cache.
-  if (url.origin !== self.location.origin) return;
+  // API responses (including authentication and personal data) are never cached.
+  if (url.origin !== self.location.origin || url.pathname.startsWith('/api/')) return;
 
   // App navigation: network first, then cached shell when offline.
   if (request.mode === 'navigate') {
