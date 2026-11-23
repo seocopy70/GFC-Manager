@@ -125,10 +125,10 @@ class ContractStore {
     return data;
   }
 
-  // 관리자 전용: 입력한 이메일로 새 초대코드 생성·발송 (관리자 여부는 서버에서도 다시 검증)
-  static async sendInvite(email) {
+  // 관리자 전용: 입력한 이메일용 새 초대코드 생성 (관리자 여부는 서버에서도 다시 검증)
+  static async createInvite(email) {
     if (!window.supabase) throw new Error('Supabase가 초기화되지 않았습니다.');
-    const { data, error } = await window.supabase.functions.invoke('send-invite', { body: { email } });
+    const { data, error } = await window.supabase.functions.invoke('create-invite', { body: { email } });
     if (error) throw new Error(await ContractStore.extractFunctionError(error));
     if (data && data.error) throw new Error(data.error);
     return data;
@@ -1161,11 +1161,14 @@ class AppUI {
       location.reload();
     });
 
-    // 초대코드 발송 모달 (관리자 전용 버튼)
+    // 초대코드 생성 모달 (관리자 전용 버튼)
     const inviteModal = document.getElementById('invite-modal');
     const inviteEmail = document.getElementById('invite-email');
     const inviteStatus = document.getElementById('invite-status');
-    const btnSendInvite = document.getElementById('btn-send-invite');
+    const inviteResult = document.getElementById('invite-result');
+    const inviteCodeText = document.getElementById('invite-code-text');
+    const btnCreateInvite = document.getElementById('btn-create-invite');
+    const btnCopyInvite = document.getElementById('btn-copy-invite');
     const setInviteStatus = (msg, ok) => {
       inviteStatus.textContent = msg;
       inviteStatus.className = 'text-sm mb-3 ' + (ok ? 'text-emerald-600' : 'text-red-600');
@@ -1173,31 +1176,45 @@ class AppUI {
     document.getElementById('btn-open-invite-modal').addEventListener('click', () => {
       inviteEmail.value = '';
       inviteStatus.classList.add('hidden');
+      inviteResult.classList.add('hidden');
       inviteModal.classList.remove('hidden');
       inviteEmail.focus();
     });
     document.getElementById('btn-close-invite-modal').addEventListener('click', () => inviteModal.classList.add('hidden'));
     const submitInvite = async () => {
       const email = inviteEmail.value.trim();
-      if (!email) { inviteStatus.classList.remove('hidden'); setInviteStatus('이메일 주소를 입력해주세요.', false); return; }
-      btnSendInvite.disabled = true;
-      btnSendInvite.textContent = '발송 중...';
+      inviteResult.classList.add('hidden');
       inviteStatus.classList.remove('hidden');
-      setInviteStatus('발송 중입니다...', true);
+      if (!email) { setInviteStatus('이메일 주소를 입력해주세요.', false); return; }
+      btnCreateInvite.disabled = true;
+      btnCreateInvite.textContent = '생성 중...';
+      setInviteStatus('생성 중입니다...', true);
       try {
-        await ContractStore.sendInvite(email);
-        setInviteStatus(`${email} 으로 새 초대코드를 보냈습니다.`, true);
-        inviteEmail.value = '';
+        const res = await ContractStore.createInvite(email);
+        inviteStatus.classList.add('hidden');
+        inviteCodeText.textContent = res.code;
+        inviteResult.dataset.email = res.email;
+        inviteResult.classList.remove('hidden');
       } catch (e) {
-        console.error('초대코드 발송 실패:', e);
+        console.error('초대코드 생성 실패:', e);
         setInviteStatus(e.message, false);
       } finally {
-        btnSendInvite.disabled = false;
-        btnSendInvite.textContent = '초대코드 발송';
+        btnCreateInvite.disabled = false;
+        btnCreateInvite.textContent = '초대코드 만들기';
       }
     };
-    btnSendInvite.addEventListener('click', submitInvite);
+    btnCreateInvite.addEventListener('click', submitInvite);
     inviteEmail.addEventListener('keydown', (e) => { if (e.key === 'Enter') submitInvite(); });
+    btnCopyInvite.addEventListener('click', async () => {
+      const text = `GFC Manager 가입 안내\n이메일: ${inviteResult.dataset.email}\n초대코드: ${inviteCodeText.textContent}\n(이 이메일로만 가입 가능, 7일 후 만료)`;
+      try {
+        await navigator.clipboard.writeText(text);
+        btnCopyInvite.textContent = '복사됨!';
+      } catch (e) {
+        window.prompt('아래 내용을 복사하세요 (Ctrl+C)', text);
+      }
+      setTimeout(() => { btnCopyInvite.textContent = '안내문 복사'; }, 1500);
+    });
 
     this.btnLogin.addEventListener('click', () => this.handleLoginOrSignup());
     [this.loginEmail, this.loginPassword].forEach(input => {
