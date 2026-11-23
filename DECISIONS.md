@@ -66,3 +66,12 @@
 - `persistSession: true`, `autoRefreshToken: true` — 로그아웃 전까지 세션 유지.
 - 아이디만(이메일 @ 앞부분) 입력해도 로그인 가능하도록 `user_lookup` 테이블 사용 (최초 1회는 전체 이메일로 로그인해야 자동 등록됨). Supabase에 `user_lookup_setup.sql` 실행 필요 (저장소에는 미포함, 별도 전달됨).
 - `config.js`의 `AUTO_LOGIN_EMAIL_DOMAIN`은 `user_lookup` 조회 실패 시의 폴백용.
+
+## 초대코드 가입 방식 (Oracle PostgreSQL 버전)
+
+- 가입은 **초대받은 이메일 + 그 이메일로 발급된 초대코드**가 서버에서 일치할 때만 가능합니다. 이전의 공용 `INVITE_CODE` 환경변수 방식은 폐지했습니다.
+- 헤더의 메일 아이콘은 `seongkyos@naver.com` 로그인 시에만 보이고, `POST /api/invites`도 서버에서 `ADMIN_EMAIL`과 같은지 다시 확인합니다(로그인·Origin·CSRF 검증 포함).
+- 메일은 보내지 않습니다. 만들어진 코드를 화면에 보여주고 관리자가 직접 복사해 전달합니다.
+- 코드는 8자리(헷갈리는 문자 제외), 매번 새로 생성하며 같은 이메일의 이전 미사용 코드는 폐기합니다. DB에는 HMAC(SECRET_KEY, 이메일+코드) 해시만 저장합니다. 7일 만료, 5회 오입력 시 무효, 1회 사용 후 소멸.
+- 초대받아 가입한 계정은 이메일 확인 완료(`email_verified = TRUE`)로 생성됩니다.
+- DB 테이블은 `backend/invites.sql`.

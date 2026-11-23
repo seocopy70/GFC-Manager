@@ -17,7 +17,7 @@
 - `backend/app.py`가 인증, 프로필, 계약 CRUD API를 제공합니다.
 - API는 `127.0.0.1:8011`에만 바인딩하고 Caddy를 통해 전용 HTTPS 호스트에서 same-origin으로 공개합니다.
 - DB 접속 정보와 비밀키는 Git에 넣지 않고 `/etc/gfc-manager/gfc-manager.env`에 보관합니다.
-- 회원가입은 서버 환경변수 `INVITE_CODE`가 설정되어 있어야 하며, 입력한 초대코드가 일치해야 합니다.
+- 회원가입은 관리자(`ADMIN_EMAIL`, 기본 seongkyos@naver.com)가 헤더의 메일 아이콘으로 만든 **이메일별 초대코드**가 있어야 하며, 가입 이메일과 코드가 일치해야 합니다. `backend/invites.sql`을 DB에 1회 실행해야 합니다.
 - 서비스 유닛 예시는 `backend/gfc-manager.service`, 환경변수 예시는 `backend/gfc-manager.env.example`입니다.
 
 ## 로컬 실행
