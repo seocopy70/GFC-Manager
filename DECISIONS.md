@@ -66,3 +66,11 @@
 - `persistSession: true`, `autoRefreshToken: true` — 로그아웃 전까지 세션 유지.
 - 아이디만(이메일 @ 앞부분) 입력해도 로그인 가능하도록 `user_lookup` 테이블 사용 (최초 1회는 전체 이메일로 로그인해야 자동 등록됨). Supabase에 `user_lookup_setup.sql` 실행 필요 (저장소에는 미포함, 별도 전달됨).
 - `config.js`의 `AUTO_LOGIN_EMAIL_DOMAIN`은 `user_lookup` 조회 실패 시의 폴백용.
+
+## 초대코드 가입 방식
+
+- 가입은 **초대받은 이메일 + 그 이메일로 발급된 초대코드**가 서버에서 일치할 때만 가능합니다. 브라우저에서 `supabase.auth.signUp`을 직접 부르지 않고, Edge Function `signup-with-invite`가 관리자 권한으로 계정을 만듭니다. (클라이언트만 검사하면 우회 가능하므로 서버 검증으로 결정)
+- 초대코드 발송 버튼(헤더의 메일 아이콘)은 `seongkyos@naver.com` 로그인 시에만 보이며, `send-invite` 함수도 서버에서 같은 이메일인지 다시 확인합니다.
+- 코드는 8자리(헷갈리는 문자 제외), 매번 새로 생성, 같은 이메일의 이전 미사용 코드는 폐기. DB에는 SHA-256(`이메일:코드`) 해시만 저장. 7일 만료, 5회 오입력 시 무효.
+- 설정 방법은 `supabase/INVITE_SETUP.md` 참고. Supabase의 "Allow new users to sign up"을 꺼야 우회 가입이 막힙니다.
+- `sw.js` 캐시 이름을 v2로 올려 기존 사용자도 새 화면을 받도록 했습니다.

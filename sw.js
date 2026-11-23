@@ -1,4 +1,4 @@
-const CACHE_NAME = 'gfc-manager-v1';
+const CACHE_NAME = 'gfc-manager-v2';
 const BASE = '/GFC-Manager/';
 const APP_SHELL = [
   BASE,
