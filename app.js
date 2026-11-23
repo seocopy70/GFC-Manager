@@ -7,6 +7,9 @@
  */
 
 // --- Data Model & Storage (same-origin Flask API) ---
+// 초대코드 생성 버튼은 이 계정으로 로그인했을 때만 보입니다. (서버 API에서도 동일하게 검증)
+const INVITE_ADMIN_EMAIL = 'seongkyos@naver.com';
+
 class ContractStore {
   static csrfToken = null;
 
@@ -58,6 +61,11 @@ class ContractStore {
       body: { identifier, password }
     });
     return { user: result.user };
+  }
+
+  // 관리자 전용: 입력한 이메일용 새 초대코드 생성 (서버에서도 관리자 여부를 다시 확인)
+  static async createInvite(email) {
+    return this.request('/invites', { method: 'POST', body: { email } });
   }
 
   static async signup(email, password) {
@@ -968,6 +976,61 @@ class AppUI {
       location.reload();
     });
 
+    // 초대코드 생성 모달 (관리자 전용 버튼)
+    const inviteModal = document.getElementById('invite-modal');
+    const inviteEmail = document.getElementById('invite-email');
+    const inviteStatus = document.getElementById('invite-status');
+    const inviteResult = document.getElementById('invite-result');
+    const inviteCodeText = document.getElementById('invite-code-text');
+    const btnCreateInvite = document.getElementById('btn-create-invite');
+    const btnCopyInvite = document.getElementById('btn-copy-invite');
+    const setInviteStatus = (msg, ok) => {
+      inviteStatus.textContent = msg;
+      inviteStatus.className = 'text-sm mb-3 ' + (ok ? 'text-emerald-600' : 'text-red-600');
+    };
+    document.getElementById('btn-open-invite-modal').addEventListener('click', () => {
+      inviteEmail.value = '';
+      inviteStatus.classList.add('hidden');
+      inviteResult.classList.add('hidden');
+      inviteModal.classList.remove('hidden');
+      inviteEmail.focus();
+    });
+    document.getElementById('btn-close-invite-modal').addEventListener('click', () => inviteModal.classList.add('hidden'));
+    const submitInvite = async () => {
+      const email = inviteEmail.value.trim();
+      inviteResult.classList.add('hidden');
+      inviteStatus.classList.remove('hidden');
+      if (!email) { setInviteStatus('이메일 주소를 입력해주세요.', false); return; }
+      btnCreateInvite.disabled = true;
+      btnCreateInvite.textContent = '생성 중...';
+      setInviteStatus('생성 중입니다...', true);
+      try {
+        const res = await ContractStore.createInvite(email);
+        inviteStatus.classList.add('hidden');
+        inviteCodeText.textContent = res.code;
+        inviteResult.dataset.email = res.email;
+        inviteResult.classList.remove('hidden');
+      } catch (e) {
+        console.error('초대코드 생성 실패:', e);
+        setInviteStatus(e.message, false);
+      } finally {
+        btnCreateInvite.disabled = false;
+        btnCreateInvite.textContent = '초대코드 만들기';
+      }
+    };
+    btnCreateInvite.addEventListener('click', submitInvite);
+    inviteEmail.addEventListener('keydown', (e) => { if (e.key === 'Enter') submitInvite(); });
+    btnCopyInvite.addEventListener('click', async () => {
+      const text = `GFC Manager 가입 안내\n이메일: ${inviteResult.dataset.email}\n초대코드: ${inviteCodeText.textContent}\n(이 이메일로만 가입 가능, 7일 후 만료)`;
+      try {
+        await navigator.clipboard.writeText(text);
+        btnCopyInvite.textContent = '복사됨!';
+      } catch (e) {
+        window.prompt('아래 내용을 복사하세요 (Ctrl+C)', text);
+      }
+      setTimeout(() => { btnCopyInvite.textContent = '안내문 복사'; }, 1500);
+    });
+
     this.btnLogin.addEventListener('click', () => this.handleLoginOrSignup());
     [this.loginEmail, this.loginPassword].forEach(input => {
       input.addEventListener('keydown', (e) => {
@@ -1104,6 +1167,7 @@ class AppUI {
     this.loginOverlay.classList.add('hidden');
     this.mainHeader.classList.remove('hidden');
     document.getElementById('user-email').textContent = user.email.split('@')[0];
+    document.getElementById('btn-open-invite-modal').classList.toggle('hidden', (user.email || '').toLowerCase() !== INVITE_ADMIN_EMAIL);
 
     try {
       this.settings = await ContractStore.getSettings();

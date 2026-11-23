@@ -24,7 +24,10 @@ APP_ORIGIN = os.environ.get("APP_ORIGIN", "").rstrip("/")
 COOKIE_NAME = os.environ.get("SESSION_COOKIE_NAME", "gfc_session")
 SESSION_DAYS = int(os.environ.get("SESSION_DAYS", "30"))
 COOKIE_SECURE = os.environ.get("COOKIE_SECURE", "true").lower() == "true"
-INVITE_CODE = os.environ.get("INVITE_CODE", "")
+ADMIN_EMAIL = os.environ.get("ADMIN_EMAIL", "seongkyos@naver.com").strip().lower()
+INVITE_DAYS = 7
+INVITE_MAX_ATTEMPTS = 5
+INVITE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"  # 헷갈리는 0/O, 1/I/L 제외
 
 if not DATABASE_URL:
     raise RuntimeError("DATABASE_URL 환경변수가 필요합니다.")
@@ -345,6 +348,49 @@ def login():
     return response
 
 
+def invite_digest(email, code):
+    """초대코드는 DB에 원문으로 저장하지 않고 (이메일+코드) HMAC 해시만 저장합니다."""
+    return hmac.new(
+        SECRET_KEY.encode("utf-8"),
+        f"invite:{email}:{code}".encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+
+
+def normalize_invite_code(raw):
+    return re.sub(r"\s+", "", str(raw or "")).upper()
+
+
+INVITE_FAIL_MESSAGE = "이메일 또는 초대코드가 올바르지 않거나 만료되었습니다."
+
+
+@app.post("/api/invites")
+@authenticated
+def create_invite():
+    """관리자 전용: 입력한 이메일용 새 초대코드를 만들어 응답으로만 돌려줍니다(메일 발송 없음)."""
+    if (g.user["email"] or "").lower() != ADMIN_EMAIL:
+        return jsonify(error="초대코드를 만들 권한이 없습니다."), 403
+    email = str(json_body().get("email") or "").strip().lower()
+    if not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email):
+        return jsonify(error="올바른 이메일 주소를 입력해주세요."), 400
+
+    code = "".join(secrets.choice(INVITE_ALPHABET) for _ in range(8))
+    expires_at = datetime.now(timezone.utc) + timedelta(days=INVITE_DAYS)
+    with db_connection() as conn:
+        with conn.cursor() as cur:
+            # 같은 이메일의 이전 미사용 코드는 모두 폐기
+            cur.execute(
+                "DELETE FROM public.invites WHERE email = %s AND used_at IS NULL",
+                (email,),
+            )
+            cur.execute(
+                """INSERT INTO public.invites (email, code_hash, expires_at, created_by)
+                   VALUES (%s, %s, %s, %s)""",
+                (email, invite_digest(email, code), expires_at, g.user["id"]),
+            )
+    return jsonify(ok=True, email=email, code=code, expiresAt=expires_at.isoformat())
+
+
 @app.post("/api/auth/signup")
 def signup():
     denied = require_origin()
@@ -353,13 +399,14 @@ def signup():
     data = json_body()
     email = str(data.get("email") or "").strip().lower()
     password = str(data.get("password") or "")
-    invite_code = str(data.get("inviteCode") or "")
-    if not INVITE_CODE or not hmac.compare_digest(invite_code, INVITE_CODE):
-        return jsonify(error="초대코드가 올바르지 않습니다."), 403
+    invite_code = normalize_invite_code(data.get("inviteCode"))
+
     if not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email):
         return jsonify(error="회원가입에는 올바른 이메일 주소가 필요합니다."), 400
     if len(password) < 6:
         return jsonify(error="비밀번호는 6자 이상이어야 합니다."), 400
+    if not invite_code:
+        return jsonify(error="초대코드를 입력해주세요."), 400
 
     ip = request.remote_addr or "unknown"
     if not rate_limit("signup:" + ip):
@@ -372,20 +419,47 @@ def signup():
     ).decode("utf-8")
     try:
         with db_connection() as conn:
-            with conn.cursor() as cur:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                # 이 이메일로 발급된 가장 최근 미사용 코드를 잠그고 확인
+                cur.execute(
+                    """SELECT id, code_hash, expires_at, attempts
+                       FROM public.invites
+                       WHERE email = %s AND used_at IS NULL
+                       ORDER BY created_at DESC LIMIT 1
+                       FOR UPDATE""",
+                    (email,),
+                )
+                invite = cur.fetchone()
+                if (
+                    not invite
+                    or invite["expires_at"] <= datetime.now(timezone.utc)
+                    or invite["attempts"] >= INVITE_MAX_ATTEMPTS
+                ):
+                    return jsonify(error=INVITE_FAIL_MESSAGE), 403
+                if not hmac.compare_digest(invite["code_hash"], invite_digest(email, invite_code)):
+                    cur.execute(
+                        "UPDATE public.invites SET attempts = attempts + 1 WHERE id = %s",
+                        (invite["id"],),
+                    )
+                    return jsonify(error=INVITE_FAIL_MESSAGE), 403  # 정상 반환이므로 오입력 횟수는 커밋됨
+
                 cur.execute(
                     """INSERT INTO public.app_users
                        (id, username, email, password_hash, email_verified, is_active)
-                       VALUES (gen_random_uuid(), %s, %s, %s, FALSE, TRUE)
+                       VALUES (gen_random_uuid(), %s, %s, %s, TRUE, TRUE)
                        RETURNING id""",
                     (username, email, password_hash),
                 )
-                new_user_id = cur.fetchone()[0]
+                new_user_id = cur.fetchone()["id"]
                 cur.execute(
                     """INSERT INTO public.profiles (id, settings)
                        VALUES (%s, %s)
                        ON CONFLICT (id) DO NOTHING""",
                     (new_user_id, Json(DEFAULT_SETTINGS)),
+                )
+                cur.execute(
+                    "UPDATE public.invites SET used_at = now() WHERE id = %s",
+                    (invite["id"],),
                 )
     except errors.UniqueViolation:
         return jsonify(error="이미 사용 중인 이메일 또는 아이디입니다."), 409
