@@ -1,0 +1,12 @@
+# Python / 서버 실행 환경
+__pycache__/
+*.pyc
+backend/venv/
+
+# Environment variables
+.env
+
+# System files
+.DS_Store
+Thumbs.db
+node_modules/
