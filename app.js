@@ -7,9 +7,6 @@
  */
 
 // --- Data Model & Storage (Supabase 전용) ---
-// 초대코드 발송 버튼은 이 계정으로 로그인했을 때만 보입니다. (서버 Edge Function에서도 동일하게 검증)
-const INVITE_ADMIN_EMAIL = 'seongkyos@naver.com';
-
 class ContractStore {
   static async getSettings() {
     const user = await this.checkAuth();
@@ -94,43 +91,16 @@ class ContractStore {
     return data;
   }
 
-  // Edge Function 오류 응답에서 서버가 보낸 메시지를 꺼내는 헬퍼
-  static async extractFunctionError(error) {
-    try {
-      if (error && error.context && typeof error.context.json === 'function') {
-        const body = await error.context.json();
-        if (body && body.error) return body.error;
-      }
-    } catch (e) { /* 무시 */ }
-    return (error && error.message) || '요청 처리 중 오류가 발생했습니다.';
-  }
-
-  // 가입: 이메일과 초대코드가 서버(Edge Function)에서 일치 확인된 경우에만 계정이 만들어짐
-  static async signup(email, password, inviteCode) {
+  static async signup(email, password) {
     if (!email || !password) {
       throw new Error('이메일과 비밀번호를 모두 입력해주세요.');
-    }
-    if (!inviteCode) {
-      throw new Error('초대코드를 입력해주세요.');
     }
     if (!window.supabase) {
       console.error('Supabase 객체 없음:', window.supabase);
       throw new Error('Supabase가 초기화되지 않았습니다.');
     }
-    const { data, error } = await window.supabase.functions.invoke('signup-with-invite', {
-      body: { email, password, code: inviteCode }
-    });
-    if (error) throw new Error(await ContractStore.extractFunctionError(error));
-    if (data && data.error) throw new Error(data.error);
-    return data;
-  }
-
-  // 관리자 전용: 입력한 이메일로 새 초대코드 생성·발송 (관리자 여부는 서버에서도 다시 검증)
-  static async sendInvite(email) {
-    if (!window.supabase) throw new Error('Supabase가 초기화되지 않았습니다.');
-    const { data, error } = await window.supabase.functions.invoke('send-invite', { body: { email } });
-    if (error) throw new Error(await ContractStore.extractFunctionError(error));
-    if (data && data.error) throw new Error(data.error);
+    const { data, error } = await window.supabase.auth.signUp({ email, password });
+    if (error) throw error;
     return data;
   }
 
@@ -1161,44 +1131,6 @@ class AppUI {
       location.reload();
     });
 
-    // 초대코드 발송 모달 (관리자 전용 버튼)
-    const inviteModal = document.getElementById('invite-modal');
-    const inviteEmail = document.getElementById('invite-email');
-    const inviteStatus = document.getElementById('invite-status');
-    const btnSendInvite = document.getElementById('btn-send-invite');
-    const setInviteStatus = (msg, ok) => {
-      inviteStatus.textContent = msg;
-      inviteStatus.className = 'text-sm mb-3 ' + (ok ? 'text-emerald-600' : 'text-red-600');
-    };
-    document.getElementById('btn-open-invite-modal').addEventListener('click', () => {
-      inviteEmail.value = '';
-      inviteStatus.classList.add('hidden');
-      inviteModal.classList.remove('hidden');
-      inviteEmail.focus();
-    });
-    document.getElementById('btn-close-invite-modal').addEventListener('click', () => inviteModal.classList.add('hidden'));
-    const submitInvite = async () => {
-      const email = inviteEmail.value.trim();
-      if (!email) { inviteStatus.classList.remove('hidden'); setInviteStatus('이메일 주소를 입력해주세요.', false); return; }
-      btnSendInvite.disabled = true;
-      btnSendInvite.textContent = '발송 중...';
-      inviteStatus.classList.remove('hidden');
-      setInviteStatus('발송 중입니다...', true);
-      try {
-        await ContractStore.sendInvite(email);
-        setInviteStatus(`${email} 으로 새 초대코드를 보냈습니다.`, true);
-        inviteEmail.value = '';
-      } catch (e) {
-        console.error('초대코드 발송 실패:', e);
-        setInviteStatus(e.message, false);
-      } finally {
-        btnSendInvite.disabled = false;
-        btnSendInvite.textContent = '초대코드 발송';
-      }
-    };
-    btnSendInvite.addEventListener('click', submitInvite);
-    inviteEmail.addEventListener('keydown', (e) => { if (e.key === 'Enter') submitInvite(); });
-
     this.btnLogin.addEventListener('click', () => this.handleLoginOrSignup());
     [this.loginEmail, this.loginPassword].forEach(input => {
       input.addEventListener('keydown', (e) => {
@@ -1335,8 +1267,6 @@ class AppUI {
     this.loginOverlay.classList.add('hidden');
     this.mainHeader.classList.remove('hidden');
     document.getElementById('user-email').textContent = user.email.split('@')[0];
-    const isInviteAdmin = (user.email || '').toLowerCase() === INVITE_ADMIN_EMAIL;
-    document.getElementById('btn-open-invite-modal').classList.toggle('hidden', !isInviteAdmin);
 
     try {
       this.settings = await ContractStore.getSettings();
@@ -1383,10 +1313,8 @@ class AppUI {
     this.btnLogin.disabled = true;
     try {
       if (this.isSignupMode) {
-        if (!email.includes('@')) throw new Error('가입 시에는 전체 이메일 주소를 입력해주세요.');
-        await ContractStore.signup(email, password, this.signupInviteCode.value.trim());
-        alert('가입이 완료되었습니다. 로그인해주세요.');
-        this.signupInviteCode.value = '';
+        await ContractStore.signup(email, password);
+        alert('가입이 완료되었습니다. 이메일 인증이 필요할 수 있습니다. 인증 후 로그인해주세요.');
         this.toggleSignupMode();
       } else {
         const { user } = await ContractStore.login(email, password);
