@@ -91,7 +91,7 @@
       </div>
 
       <div id="auth-container" class="flex items-center space-x-2">
-        <button id="btn-open-invite-modal" class="hidden p-2 bg-slate-800 hover:bg-slate-700 text-white rounded-lg transition" title="초대코드 만들기" aria-label="초대코드 만들기"><i data-lucide="mail-plus" class="w-4 h-4"></i></button>
+        <button id="btn-open-invite-modal" class="hidden p-2 bg-slate-800 hover:bg-slate-700 text-white rounded-lg transition" title="초대코드 보내기" aria-label="초대코드 보내기"><i data-lucide="mail-plus" class="w-4 h-4"></i></button>
         <span id="user-email" class="text-xs text-slate-400 max-w-[180px] truncate"></span>
         <button id="btn-logout" class="p-2 text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg transition" title="로그아웃" aria-label="로그아웃"><i data-lucide="log-out" class="w-4 h-4"></i></button>
       </div>
@@ -739,18 +739,13 @@
   <div id="invite-modal" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm hidden">
     <div class="bg-white rounded-2xl shadow-2xl w-full max-w-sm mx-4 p-6">
       <div class="flex items-center justify-between mb-4">
-        <h3 class="text-lg font-bold text-slate-900">초대코드 만들기</h3>
+        <h3 class="text-lg font-bold text-slate-900">초대코드 보내기</h3>
         <button type="button" id="btn-close-invite-modal" class="p-1 text-slate-400 hover:text-slate-700" aria-label="닫기"><i data-lucide="x" class="w-5 h-5"></i></button>
       </div>
-      <p class="text-xs text-slate-500 mb-3">초대할 이메일용 새 코드를 만들어 보여드립니다. 직접 복사해서 전달하세요. 같은 이메일의 이전 미사용 코드는 무효가 됩니다.</p>
+      <p class="text-xs text-slate-500 mb-3">입력한 이메일로 새 초대코드가 만들어져 발송됩니다. 이전에 보낸 미사용 코드는 무효가 됩니다.</p>
       <input type="email" id="invite-email" placeholder="초대할 이메일 주소" autocomplete="off" class="w-full px-4 py-2 mb-3 border rounded-lg">
       <p id="invite-status" class="text-sm mb-3 hidden"></p>
-      <button type="button" id="btn-create-invite" class="w-full bg-emerald-600 hover:bg-emerald-500 text-white py-2 rounded-lg font-bold">초대코드 만들기</button>
-      <div id="invite-result" class="hidden mt-4 p-4 bg-slate-100 rounded-lg text-center">
-        <p class="text-xs text-slate-500 mb-1">초대코드 (이 화면을 닫으면 다시 볼 수 없습니다)</p>
-        <p id="invite-code-text" class="text-3xl font-bold tracking-widest text-slate-900 select-all mb-3"></p>
-        <button type="button" id="btn-copy-invite" class="w-full bg-slate-800 hover:bg-slate-700 text-white py-2 rounded-lg font-bold">안내문 복사</button>
-      </div>
+      <button type="button" id="btn-send-invite" class="w-full bg-emerald-600 hover:bg-emerald-500 text-white py-2 rounded-lg font-bold">초대코드 발송</button>
     </div>
   </div>
 
