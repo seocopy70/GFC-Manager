@@ -63,6 +63,15 @@ class ContractStore {
     return { user: result.user };
   }
 
+  // 관리자 전용: 가입 계정 목록 / 삭제 (서버에서도 관리자 여부를 다시 확인)
+  static async listUsers() {
+    return this.request('/admin/users');
+  }
+
+  static async deleteUser(id, confirmEmail) {
+    return this.request('/admin/users/' + encodeURIComponent(id), { method: 'DELETE', body: { confirmEmail } });
+  }
+
   // 관리자 전용: 입력한 이메일용 새 초대코드 생성 (서버에서도 관리자 여부를 다시 확인)
   static async createInvite(email) {
     return this.request('/invites', { method: 'POST', body: { email } });
@@ -976,6 +985,72 @@ class AppUI {
       location.reload();
     });
 
+    // 가입 계정 관리 모달 (관리자 전용 버튼)
+    const usersModal = document.getElementById('users-modal');
+    const usersList = document.getElementById('users-list');
+    const usersStatus = document.getElementById('users-status');
+    const setUsersStatus = (msg, ok) => {
+      usersStatus.textContent = msg || '';
+      usersStatus.className = 'text-sm mb-2 ' + (msg ? (ok ? 'text-emerald-600' : 'text-red-600') : 'hidden');
+    };
+    const renderUsers = (users) => {
+      usersList.replaceChildren();
+      users.forEach((u) => {
+        const row = document.createElement('div');
+        row.className = 'flex items-center justify-between gap-2 p-3';
+        const info = document.createElement('div');
+        info.className = 'min-w-0';
+        const name = document.createElement('p');
+        name.className = 'text-sm font-semibold text-slate-900 truncate';
+        name.textContent = u.email + (u.isAdmin ? ' (관리자)' : '');
+        const meta = document.createElement('p');
+        meta.className = 'text-xs text-slate-500';
+        const last = u.lastLoginAt ? new Date(u.lastLoginAt).toLocaleDateString('ko-KR') : '로그인 기록 없음';
+        meta.textContent = `계약 ${u.contractCount}건 · 마지막 로그인 ${last}`;
+        info.append(name, meta);
+        row.appendChild(info);
+        if (!u.isAdmin && !u.isSelf) {
+          const del = document.createElement('button');
+          del.type = 'button';
+          del.className = 'shrink-0 px-3 py-1 text-xs font-bold text-white bg-red-600 hover:bg-red-500 rounded-lg';
+          del.textContent = '삭제';
+          del.addEventListener('click', async () => {
+            const typed = window.prompt(
+              `${u.email} 계정과 계약 ${u.contractCount}건이 영구 삭제됩니다.\n되돌릴 수 없습니다. 삭제하려면 이 계정의 이메일을 그대로 입력하세요.`
+            );
+            if (typed === null) return;
+            del.disabled = true;
+            try {
+              const res = await ContractStore.deleteUser(u.id, typed.trim());
+              await loadUsers(`${res.email} 계정을 삭제했습니다. (계약 ${res.deletedContracts}건 포함)`);
+            } catch (e) {
+              console.error('계정 삭제 실패:', e);
+              setUsersStatus(e.message, false);
+              del.disabled = false;
+            }
+          });
+          row.appendChild(del);
+        }
+        usersList.appendChild(row);
+      });
+    };
+    const loadUsers = async (okMessage) => {
+      setUsersStatus(okMessage || '불러오는 중...', true);
+      try {
+        const res = await ContractStore.listUsers();
+        renderUsers(res.users || []);
+        setUsersStatus(okMessage || '', true);
+      } catch (e) {
+        console.error('계정 목록 실패:', e);
+        setUsersStatus(e.message, false);
+      }
+    };
+    document.getElementById('btn-open-users-modal').addEventListener('click', () => {
+      usersModal.classList.remove('hidden');
+      loadUsers();
+    });
+    document.getElementById('btn-close-users-modal').addEventListener('click', () => usersModal.classList.add('hidden'));
+
     // 초대코드 생성 모달 (관리자 전용 버튼)
     const inviteModal = document.getElementById('invite-modal');
     const inviteEmail = document.getElementById('invite-email');
@@ -1168,6 +1243,7 @@ class AppUI {
     this.mainHeader.classList.remove('hidden');
     document.getElementById('user-email').textContent = user.email.split('@')[0];
     document.getElementById('btn-open-invite-modal').classList.toggle('hidden', (user.email || '').toLowerCase() !== INVITE_ADMIN_EMAIL);
+    document.getElementById('btn-open-users-modal').classList.toggle('hidden', (user.email || '').toLowerCase() !== INVITE_ADMIN_EMAIL);
 
     try {
       this.settings = await ContractStore.getSettings();

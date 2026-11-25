@@ -89,6 +89,7 @@
       </div>
 
       <div id="auth-container" class="flex items-center space-x-2">
+        <button id="btn-open-users-modal" class="hidden p-2 bg-slate-800 hover:bg-slate-700 text-white rounded-lg transition" title="가입 계정 관리" aria-label="가입 계정 관리"><i data-lucide="users" class="w-4 h-4"></i></button>
         <button id="btn-open-invite-modal" class="hidden p-2 bg-slate-800 hover:bg-slate-700 text-white rounded-lg transition" title="초대코드 만들기" aria-label="초대코드 만들기"><i data-lucide="mail-plus" class="w-4 h-4"></i></button>
         <span id="user-email" class="text-xs text-slate-400 max-w-[180px] truncate"></span>
         <button id="btn-logout" class="p-2 text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg transition" title="로그아웃" aria-label="로그아웃"><i data-lucide="log-out" class="w-4 h-4"></i></button>
@@ -749,6 +750,20 @@
         <p id="invite-code-text" class="text-3xl font-bold tracking-widest text-slate-900 select-all mb-3"></p>
         <button type="button" id="btn-copy-invite" class="w-full bg-slate-800 hover:bg-slate-700 text-white py-2 rounded-lg font-bold">안내문 복사</button>
       </div>
+    </div>
+  </div>
+
+
+  <!-- Users Modal (관리자 전용: 가입 계정 목록·삭제) -->
+  <div id="users-modal" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm hidden">
+    <div class="bg-white rounded-2xl shadow-2xl w-full max-w-lg mx-4 p-6 max-h-[85vh] flex flex-col">
+      <div class="flex items-center justify-between mb-3">
+        <h3 class="text-lg font-bold text-slate-900">가입 계정 관리</h3>
+        <button type="button" id="btn-close-users-modal" class="p-1 text-slate-400 hover:text-slate-700" aria-label="닫기"><i data-lucide="x" class="w-5 h-5"></i></button>
+      </div>
+      <p class="text-xs text-slate-500 mb-3">테스트용 계정을 삭제하면 그 계정의 계약 데이터까지 <b>영구 삭제</b>되며 되돌릴 수 없습니다.</p>
+      <p id="users-status" class="text-sm mb-2 hidden"></p>
+      <div id="users-list" class="overflow-y-auto divide-y border rounded-lg"></div>
     </div>
   </div>
 

@@ -5,6 +5,7 @@ import hmac
 import hashlib
 import secrets
 import threading
+import uuid
 from collections import defaultdict, deque
 from datetime import datetime, timedelta, timezone
 from functools import wraps
@@ -389,6 +390,84 @@ def create_invite():
                 (email, invite_digest(email, code), expires_at, g.user["id"]),
             )
     return jsonify(ok=True, email=email, code=code, expiresAt=expires_at.isoformat())
+
+
+def require_admin():
+    """관리자(ADMIN_EMAIL) 계정이 아니면 403 응답을 돌려줍니다. 통과하면 None."""
+    if (g.user["email"] or "").lower() != ADMIN_EMAIL:
+        return jsonify(error="관리자만 사용할 수 있습니다."), 403
+    return None
+
+
+@app.get("/api/admin/users")
+@authenticated
+def admin_list_users():
+    """관리자 전용: 가입 계정 목록 (계정별 계약 건수 포함)."""
+    denied = require_admin()
+    if denied:
+        return denied
+    with db_connection() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                """SELECT u.id, u.email, u.last_login_at,
+                          (SELECT count(*) FROM public.contracts c WHERE c.user_id = u.id) AS contract_count
+                   FROM public.app_users u
+                   ORDER BY lower(u.email)"""
+            )
+            rows = cur.fetchall()
+    return jsonify(
+        users=[
+            {
+                "id": str(r["id"]),
+                "email": r["email"],
+                "lastLoginAt": r["last_login_at"].isoformat() if r["last_login_at"] else None,
+                "contractCount": int(r["contract_count"]),
+                "isAdmin": (r["email"] or "").lower() == ADMIN_EMAIL,
+                "isSelf": str(r["id"]) == str(g.user["id"]),
+            }
+            for r in rows
+        ]
+    )
+
+
+@app.delete("/api/admin/users/<user_id>")
+@authenticated
+def admin_delete_user(user_id):
+    """관리자 전용: 계정과 그 계정의 모든 데이터(계약, 세션, 프로필, 초대코드)를 영구 삭제합니다."""
+    denied = require_admin()
+    if denied:
+        return denied
+    try:
+        target_id = str(uuid.UUID(str(user_id)))
+    except ValueError:
+        return jsonify(error="잘못된 계정 ID입니다."), 400
+    if target_id == str(g.user["id"]):
+        return jsonify(error="본인 계정은 삭제할 수 없습니다."), 400
+    confirm_email = str(json_body().get("confirmEmail") or "").strip().lower()
+
+    with db_connection() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                "SELECT id, email FROM public.app_users WHERE id = %s FOR UPDATE",
+                (target_id,),
+            )
+            target = cur.fetchone()
+            if not target:
+                return jsonify(error="삭제할 계정을 찾을 수 없습니다."), 404
+            email = (target["email"] or "").lower()
+            if email == ADMIN_EMAIL:
+                return jsonify(error="관리자 계정은 삭제할 수 없습니다."), 400
+            if confirm_email != email:
+                return jsonify(error="확인용 이메일이 일치하지 않습니다."), 400
+
+            # 한 트랜잭션으로 처리: 중간에 하나라도 실패하면 전부 취소됩니다.
+            cur.execute("DELETE FROM public.app_sessions WHERE user_id = %s", (target_id,))
+            cur.execute("DELETE FROM public.contracts WHERE user_id = %s", (target_id,))
+            deleted_contracts = cur.rowcount
+            cur.execute("DELETE FROM public.profiles WHERE id = %s", (target_id,))
+            cur.execute("DELETE FROM public.invites WHERE email = %s", (email,))
+            cur.execute("DELETE FROM public.app_users WHERE id = %s", (target_id,))
+    return jsonify(ok=True, email=email, deletedContracts=deleted_contracts)
 
 
 @app.post("/api/auth/signup")

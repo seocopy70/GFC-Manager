@@ -1,4 +1,4 @@
-const CACHE_NAME = 'gfc-manager-v3';
+const CACHE_NAME = 'gfc-manager-v4';
 const BASE_URL = new URL('./', self.registration.scope);
 const BASE = BASE_URL.pathname;
 const APP_SHELL = [
